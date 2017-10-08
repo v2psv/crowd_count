@@ -1,0 +1,38 @@
+{
+  "data":{
+    "dataset":"mall",
+    "dataset_path":"/home/zhouqi/crowd_count/dataset/mall_dataset.h5",
+    "raw_img_path":"/home/zhouqi/crowd_count/dataset/raw_data/mall/author/raw_rgb_images/",
+    "dmap_group":"dmap_gaussRange_35_sigma30",
+    "train_batch_size":2,
+    "train_size":800,
+    "train_idx":[0, 800],
+    "test_batch_size":100,
+    "test_size":1200,
+    "test_idx":[800, 2000],
+    "img_width":640,
+    "img_height":480,
+    "dmap_width":160,
+    "dmap_height":120,
+    "img_num_channel":3,
+    "img_preprocess":
+    {
+      "mask":true,
+      "normalize":true
+    },
+    "img_augment":
+    {
+      "RandomHorizontalFlip":true,
+      "RandomPosCrop":{"size":[240, 320], "padding":0}
+    }
+  },
+  "model":{
+    "arch":"MCNN",
+    "epochs":1e5,
+    "test_freq":5,
+    "learning_rate":1e-2,
+    "momentum":0.9,
+    "weight_decay":1e-4,
+    "resume":false
+  }
+}

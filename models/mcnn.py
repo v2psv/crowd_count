@@ -5,17 +5,17 @@ import math
 
 class MCNN(nn.Module):
 
-    def __init__(self):
+    def __init__(self, num_channels=3):
         super(MCNN, self).__init__()
-        self.column1 = self._make_column(in_channels=[1, 16, 32, 16],
+        self.column1 = self._make_column(in_channels=[num_channels, 16, 32, 16],
         								 out_channels=[16, 32, 16, 8],
         								 ksize=[9, 7, 7, 7],
         								 stride=[1, 1, 1, 1])
-        self.column2 = self._make_column(in_channels=[1, 20, 40, 20],
+        self.column2 = self._make_column(in_channels=[num_channels, 20, 40, 20],
         								 out_channels=[20, 40, 20, 10],
         								 ksize=[7, 5, 5, 5],
         								 stride=[1, 1, 1, 1])
-        self.column3 = self._make_column(in_channels=[1, 24, 48, 24],
+        self.column3 = self._make_column(in_channels=[num_channels, 24, 48, 24],
         								 out_channels=[24, 48, 24, 12],
         								 ksize=[5, 3, 3, 3],
         								 stride=[1, 1, 1, 1])

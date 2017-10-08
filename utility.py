@@ -25,18 +25,11 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def accuracy(output, cnt):
-    pred = np.sum(output.data.cpu().numpy(), axis=(1, 2, 3))
-    truth = np.sum(cnt.data.cpu().numpy(), axis=(1, 2, 3))
-
-    return np.mean(abs(pred-truth)), np.sqrt(np.mean((pred-truth)**2))
-
-
 def print_info(epoch=None, train_time=None, test_time=None, \
                 loss=None, error_mae=None, error_mse=None):
     """
     epoch: tuple (epoch index, total number of epochs)
-    train_time, test_time, loss, error_mae, error_mse: AverageMeter objects
+    train_time, test_time, loss, error_mae, error_mse, error_rmse: AverageMeter objects
     """
     str = ''
     if epoch is not None:
@@ -48,10 +41,22 @@ def print_info(epoch=None, train_time=None, test_time=None, \
     if loss is not None:
         str = str + 'Loss {loss.avg:.5f}   '.format(loss=loss)
     if error_mae is not None and error_mse is not None:
-        str = str + 'Error [{error_mae.avg:.3f} {error_mse.avg:.3f}]'.format(error_mae=error_mae, error_mse=error_mse)
+        str = str + 'Error [{error_mae.avg:.3f} {error_mse.avg:.3f}]'\
+                    .format(error_mae=error_mae, error_mse=error_mse)
 
     if len(str) > 0:
         print(str)
+
+
+def _check_params(params):
+    pass
+
+def load_params(json_file):
+    with open(json_file) as data_file:
+        data = json.load(data_file)
+    _check_params(data)
+
+    return data
 
 
 def adjust_learning_rate(optimizer, epoch, lr):
@@ -77,7 +82,7 @@ def save_checkpoint(chkp_dir, stats):
     torch.save(stats, chkp_file)
 
 
-def save_pred_result(chkp_dir, train_loss, test_loss, input_img, pred_dmap, truth_dmap, sample=0):
+def save_pred_result(chkp_dir, train_loss, test_loss, pred_dmap, pred_idx, sample=0):
     if not os.path.exists(chkp_dir):
         os.makedirs(chkp_dir)
 
@@ -87,13 +92,11 @@ def save_pred_result(chkp_dir, train_loss, test_loss, input_img, pred_dmap, trut
         hdf.create_dataset("test_loss", data=test_loss)
 
         if sample == 0:
-            idx_list = np.arange(input_img.shape[0])
+            idx = np.arange(pred_dmap.shape[0])
         else:
-            idx_list = sorted(np.random.permutation(input_img.shape[0])[:sample])
-        hdf.create_dataset('img_index', data=idx_list)
-        hdf.create_dataset("pred_dmap", data=pred_dmap[idx_list, :, :])
-        hdf.create_dataset("truth_dmap", data=truth_dmap[idx_list, :, :])
-        hdf.create_dataset("input_img", data=input_img[idx_list, :, :])
+            idx = sorted(np.random.permutation(pred_dmap.shape[0])[:sample])
+        hdf.create_dataset('img_index', data=pred_idx[idx])
+        hdf.create_dataset("pred_dmap", data=pred_dmap[idx, :, :])
 
 
 class MSELoss(_Loss):
@@ -101,6 +104,20 @@ class MSELoss(_Loss):
         # _assert_no_grad(target)
         loss = torch.sum((input - target)**2) / input.size(0)
         return loss
+
+def accuracy(output, cnt, dmap_roi=None):
+    if dmap_roi is not None:
+        pred = output.data.cpu().numpy() * dmap_roi.numpy()
+    else:
+        pred = output.data.cpu().numpy()
+    pred = output.data.cpu().numpy()
+    pred = np.sum(pred, axis=(1, 2, 3))
+    truth = np.sum(cnt.data.cpu().numpy(), axis=(1, 2, 3))
+
+    mae = np.mean(abs(pred-truth))
+    mse = np.mean((pred-truth)**2)
+
+    return mae, mse
 
 
 class Timer(object):
