@@ -71,7 +71,13 @@ if __name__ == "__main__":
 	optimizer = torch.optim.Adagrad(model.parameters(),
 									lr=args['model']['learning_rate'],
 									weight_decay=args['model']['weight_decay'])
-
+	# optimizer = torch.optim.SGD(model.parameters(),
+	# 							lr=args['model']['learning_rate'],
+    #                             momentum=args['model']['momentum'],
+    #                             weight_decay=args['model']['weight_decay'])
+	# optimizer = torch.optim.Adadelta(model.parameters(),
+	# 								lr=args['model']['learning_rate'],
+	# 								weight_decay=args['model']['weight_decay'])
 	train_loader, test_loader = init_dataloader(args)
 
 	# (loss, mae, mse, rmse)
@@ -89,6 +95,8 @@ if __name__ == "__main__":
 	for e in range(start_epoch, args['model']['epochs']):
 		# train
 		loss, error_mae, error_mse, train_time = engine.train(train_loader, model, criterion, optimizer)
+		# lr = utility.adjust_learning_rate(optimizer, e, args['model']['learning_rate'], period=100)
+
 		utility.print_info(epoch=(e, args['model']['epochs']),
 						   train_time=train_time,
 						   loss=loss,

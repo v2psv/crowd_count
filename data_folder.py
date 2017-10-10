@@ -29,7 +29,8 @@ class ImageFolder(data.Dataset):
                 roi = hdf['dmap_roi'][:, :]
                 self.dmap_roi = torch.from_numpy(roi[np.newaxis,:,:]).type(torch.FloatTensor)
             else:
-                self.dmap_roi = torch.from_numpy(np.ones((1, args['data']['dmap_height'], args['data']['dmap_width']))).type(torch.FloatTensor)
+                h, w = args['data']['dmap_height'], args['data']['dmap_width']
+                self.dmap_roi = torch.from_numpy(np.ones((1, h, w))).type(torch.FloatTensor)
 
             self.dmap_list = [hdf[self.dmap_group+'/'+img_name][:,:] for img_name in self.img_name_list]
             self.dmap_list = [torch.from_numpy(dmap[np.newaxis,:,:]) for dmap in self.dmap_list]
@@ -84,10 +85,10 @@ class ImageFolder(data.Dataset):
         if augment_dict["RandomHorizontalFlip"]:
             aug.append(RandomHorizontalFlip())
 
-        # if "RandomPosCrop" in augment_dict:
-        #     size = augment_dict["RandomPosCrop"]["size"]
-        #     padding = augment_dict["RandomPosCrop"]["padding"]
-        #     aug.append(RandomPosCrop(size, padding=padding))
+        if "RandomPosCrop" in augment_dict:
+            size = augment_dict["RandomPosCrop"]["size"]
+            padding = augment_dict["RandomPosCrop"]["padding"]
+            aug.append(RandomPosCrop(size, padding=padding))
 
         return Compose(aug)
 

@@ -18,8 +18,7 @@
     },
     "img_augment":
     {
-      "RandomHorizontalFlip":true,
-      "RandomPosCrop":{"size":[80, 120], "padding":0}
+      "RandomHorizontalFlip":true
     }
   },
   "model":{
@@ -30,6 +29,6 @@
     "learning_rate":1e-2,
     "momentum":0.9,
     "weight_decay":1e-4,
-    "resume":"checkpoint/2017-10-08_17-26-20"
+    "resume":false
   }
 }

@@ -26,7 +26,7 @@ class AverageMeter(object):
 
 
 def print_info(epoch=None, train_time=None, test_time=None, \
-                loss=None, error_mae=None, error_mse=None):
+                loss=None, error_mae=None, error_mse=None, lr=None):
     """
     epoch: tuple (epoch index, total number of epochs)
     train_time, test_time, loss, error_mae, error_mse, error_rmse: AverageMeter objects
@@ -41,8 +41,10 @@ def print_info(epoch=None, train_time=None, test_time=None, \
     if loss is not None:
         str = str + 'Loss {loss.avg:.5f}   '.format(loss=loss)
     if error_mae is not None and error_mse is not None:
-        str = str + 'Error [{error_mae.avg:.3f} {error_mse.avg:.3f}]'\
+        str = str + 'Error [{error_mae.avg:.3f} {error_mse.avg:.3f}]   '\
                     .format(error_mae=error_mae, error_mse=error_mse)
+    if lr is not None:
+        str = str + 'Learnig Rate {lr:.3E}'.format(lr=lr)
 
     if len(str) > 0:
         print(str)
@@ -57,14 +59,6 @@ def load_params(json_file):
     _check_params(data)
 
     return data
-
-
-def adjust_learning_rate(optimizer, epoch, lr):
-    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    lr = lr * (0.1 ** (epoch // 30))
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-
 
 def save_args(chkp_dir, args):
     if not os.path.exists(chkp_dir):
@@ -119,6 +113,13 @@ def accuracy(output, cnt, dmap_roi=None):
 
     return mae, mse
 
+
+def adjust_learning_rate(optimizer, epoch, base_lr, period=50):
+    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
+    lr = base_lr * (0.1 ** (epoch // period))
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
+    return lr
 
 class Timer(object):
     """Timer class."""

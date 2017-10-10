@@ -80,13 +80,13 @@ class RandomHorizontalFlip(object):
     def __call__(self, img, dmap):
         """
         Args:
-            img (Tensor): Image to be flipped.
+            img (Tensor, CHW): Image to be flipped.
         Returns:
             Tensor: Randomly flipped image.
         """
         if random.random() < 0.5:
-            img_np = np.fliplr(img.numpy()).copy()
-            dmap_np = np.fliplr(dmap.numpy()).copy()
+            img_np = np.flip(img.numpy(), 2).copy()
+            dmap_np = np.flip(dmap.numpy(), 2).copy()
             return torch.from_numpy(img_np), torch.from_numpy(dmap_np)
         return img, dmap
 
@@ -105,7 +105,7 @@ class RandomPosCrop(object):
             respectively.
     """
 
-    def __init__(self, size, padding=False):
+    def __init__(self, size, padding=0):
         if isinstance(size, numbers.Number):
             self.size = (int(size), int(size))
         else:
@@ -121,6 +121,9 @@ class RandomPosCrop(object):
         Returns:
             (Tensor, Tensor): Cropped image and dmap.
         """
+        if random.random() < 0.5:
+            return img, dmap
+
         c1, h1, w1 = img.size()
         c2, h2, w2 = dmap.size()
 
@@ -136,10 +139,10 @@ class RandomPosCrop(object):
         y2 = random.randint(0, h2 - th2)
         x1, y1 = int(x2*ratio), int(y2*ratio)
 
-        if self.padding is False:
+        if self.padding == 0:
             img1  = img[:, y1:y1+th1, x1:x1+tw1]
             dmap1 = dmap[:, y2:y2+th2, x2:x2+tw2]
-        elif self.padding == 0:
+        elif self.padding == 1:
             img1, dmap1 = torch.zeros(img.size()), torch.zeros(dmap.size())
             img1[:, :th1, :tw1]  = img[:, y1:y1+th1, x1:x1+tw1]
             dmap1[:, :th2, :tw2] = dmap[:, y2:y2+th2, x2:x2+tw2]
@@ -149,4 +152,5 @@ class RandomPosCrop(object):
         else:
             raise Exception("cannot recognize the padding method: " + str(self.padding))
 
+        print(img1.size(), dmap1.size())
         return img1, dmap1
