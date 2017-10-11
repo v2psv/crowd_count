@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
-from data_folder import ImageFolder
+from data_folder2 import ImageFolder
 from datetime import datetime
 import models, engine, utility, transform
 
@@ -50,7 +50,7 @@ def init_dataloader(args):
 
 		test_set = ImageFolder(args=args, idx_list=test_idx)
 		test_loader = torch.utils.data.DataLoader(test_set,
-								batch_size=args['data']['test_batch_size'],
+								batch_size=1,
 								shuffle=False,
 								num_workers=1,
 								pin_memory=True)
@@ -106,9 +106,7 @@ if __name__ == "__main__":
 
 		# validation
 		if (e+1) % args['model']['test_freq'] == 0:
-			pred_dmap = np.zeros((args['data']['test_size'], args['data']['dmap_height'], args['data']['dmap_width']))
-			pred_idx = np.zeros(args['data']['test_size'])
-			loss, error_mae, error_mse, test_time = engine.validate(test_loader, model, criterion, pred_dmap, pred_idx)
+			loss, error_mae, error_mse, test_time, pred_dmap, pred_idx = engine.validate(test_loader, model, criterion)
 			utility.print_info(test_time=test_time,
 							   loss=loss,
 							   error_mae=error_mae,

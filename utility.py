@@ -41,8 +41,9 @@ def print_info(epoch=None, train_time=None, test_time=None, \
     if loss is not None:
         str = str + 'Loss {loss.avg:.5f}   '.format(loss=loss)
     if error_mae is not None and error_mse is not None:
-        str = str + 'Error [{error_mae.avg:.3f} {error_mse.avg:.3f}]   '\
-                    .format(error_mae=error_mae, error_mse=error_mse)
+        rmse = np.sqrt(error_mse.avg)
+        str = str + 'Error [{error_mae.avg:.3f} {error_mse.avg:.3f} {rmse:.3f}]   '\
+                    .format(error_mae=error_mae, error_mse=error_mse, rmse=rmse)
     if lr is not None:
         str = str + 'Learnig Rate {lr:.3E}'.format(lr=lr)
 
@@ -81,16 +82,20 @@ def save_pred_result(chkp_dir, train_loss, test_loss, pred_dmap, pred_idx, sampl
         os.makedirs(chkp_dir)
 
     result_file = chkp_dir + '/result.h5'
+    num_pred = len(pred_dmap)
+
     with h5py.File(result_file, 'w') as hdf:
         hdf.create_dataset("train_loss", data=train_loss)
         hdf.create_dataset("test_loss", data=test_loss)
 
         if sample == 0:
-            idx = np.arange(pred_dmap.shape[0])
+            idx = np.arange(num_pred)
         else:
-            idx = sorted(np.random.permutation(pred_dmap.shape[0])[:sample])
-        hdf.create_dataset('img_index', data=pred_idx[idx])
-        hdf.create_dataset("pred_dmap", data=pred_dmap[idx, :, :])
+            idx = sorted(np.random.permutation(num_pred)[:sample])
+
+        hdf.create_dataset('img_index', data=[pred_idx[i] for i in idx])
+	for i in idx:
+            hdf.create_dataset("pred_dmap/"+str(pred_idx[i]), data=pred_dmap[i])
 
 
 class MSELoss(_Loss):
@@ -98,20 +103,6 @@ class MSELoss(_Loss):
         # _assert_no_grad(target)
         loss = torch.sum((input - target)**2) / input.size(0)
         return loss
-
-def accuracy(output, cnt, dmap_roi=None):
-    if dmap_roi is not None:
-        pred = output.data.cpu().numpy() * dmap_roi.numpy()
-    else:
-        pred = output.data.cpu().numpy()
-    pred = output.data.cpu().numpy()
-    pred = np.sum(pred, axis=(1, 2, 3))
-    truth = np.sum(cnt.data.cpu().numpy(), axis=(1, 2, 3))
-
-    mae = np.mean(abs(pred-truth))
-    mse = np.mean((pred-truth)**2)
-
-    return mae, mse
 
 
 def adjust_learning_rate(optimizer, epoch, base_lr, period=50):

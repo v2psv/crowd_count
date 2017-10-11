@@ -1,0 +1,33 @@
+{
+  "data":{
+    "dataset":"shanghaitech_part_A",
+    "dataset_path":"/home/zhouqi/crowd_count/dataset/shanghaitech_part_A_final.h5",
+    "raw_img_path":"/home/zhouqi/crowd_count/dataset/raw_data/ShanghaiTech/part_A_final/train_test_images/",
+    "dmap_group":"dmap_gaussRange_31_beta_0.3",
+    "train_size":300,
+    "test_size":182,
+    "train_batch_size":32,
+    "test_batch_size":1,
+    "img_num_channel":3,
+    "img_preprocess":
+    {
+      "scale":false,
+      "normalize":true
+    },
+    "img_augment":
+    {
+      "RandomHorizontalFlip":true,
+      "RandomPosCrop":{"size":[256, 512]}
+    }
+  },
+  "model":{
+    "arch":"PNET",
+    "epochs":1e5,
+    "use_roi":false,
+    "test_freq":10,
+    "learning_rate":1e-2,
+    "momentum":0.9,
+    "weight_decay":1e-6,
+    "resume":false
+  }
+}
