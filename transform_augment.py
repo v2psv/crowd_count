@@ -3,7 +3,7 @@ import numbers
 import torch
 import numpy as np
 from scipy.misc import imresize
-
+from torch.nn.modules import padding
 
 class Compose(object):
     """Composes several transforms together.
@@ -14,15 +14,15 @@ class Compose(object):
     def __init__(self, transforms):
         self.transforms = transforms
 
-    def __call__(self, img, dmap=None):
+    def __call__(self, img, dmap=None, pmap=None):
         if dmap is None:
             for t in self.transforms:
                 img = t(img)
             return img
         else:
             for t in self.transforms:
-                img, dmap = t(img, dmap)
-            return img, dmap
+                img, dmap, pmap = t(img, dmap, pmap)
+            return img, dmap, pmap
 
 
 class ToTensor(object):
@@ -77,18 +77,30 @@ class Mask(object):
 class RandomHorizontalFlip(object):
     """Horizontally flip the given Tensor randomly with a probability of 0.5."""
 
-    def __call__(self, img, dmap):
+    def __call__(self, img, dmap=None, pmap=None):
         """
         Args:
             img (Tensor, CHW): Image to be flipped.
         Returns:
             Tensor: Randomly flipped image.
         """
+        res = []
+
         if random.random() < 0.5:
             img_np = np.flip(img.numpy(), 2).copy()
-            dmap_np = np.flip(dmap.numpy(), 2).copy()
-            return torch.from_numpy(img_np), torch.from_numpy(dmap_np)
-        return img, dmap
+            res.append(torch.from_numpy(img_np))
+
+            if dmap is not None:
+                dmap_np = np.flip(dmap.numpy(), 2).copy()
+                res.append(torch.from_numpy(dmap_np))
+
+            if pmap is not None:
+                pmap_np = np.flip(pmap.numpy(), 2).copy()
+                res.append(torch.from_numpy(pmap_np))
+        else:
+            res = [img, dmap, pmap]
+
+        return res
 
 
 class RandomPosCrop(object):
@@ -97,60 +109,70 @@ class RandomPosCrop(object):
         size (sequence or int): Desired output size of the crop. If size is an
             int instead of sequence like (h, w), a square crop (size, size) is
             made.
-        padding (int or sequence, optional): Optional padding on each border
-            of the image.
-            Default is False, i.e no padding.
-            If padding = 0, padding to original size.
-            If a sequence of length 4 is provided, it is used to pad [left, top, right, bottom] borders
-            respectively.
     """
 
-    def __init__(self, size, padding=0):
-        if isinstance(size, numbers.Number):
-            self.size = (int(size), int(size))
+    def __init__(self, crop_size):
+        if isinstance(crop_size, numbers.Number):
+            self.crop_size = (int(crop_size), int(crop_size))
         else:
-            self.size = size
+            self.crop_size = crop_size
 
-        self.padding = padding
 
-    def __call__(self, img, dmap):
+    def pad_2d(self, in_matrix, size):
+        # size: tuple(left, right, top, bottom)
+        if isinstance(size, numbers.Number):
+            l, r, t, b = (int(size), int(size), int(size), int(size))
+        else:
+            l, r, t, b = size
+
+        # pad = padding.ConstantPad3d((l, r, t, b, 0, 0), 0)
+        # matrix = pad(matrix)
+
+        c, h, w = in_matrix.size()
+        matrix = torch.zeros(c, h+t+b, w+l+r)
+        matrix[:, t:h+t, l:w+l] = in_matrix[:,:,:]
+
+        return matrix
+
+
+    def __call__(self, img, dmap, pmap):
         """
         Args:
             img (Tensor): image to be cropped.
             dmap (Tensor): density map to be cropped.
+            pmap (Tensor): perspective map to be cropped.
         Returns:
-            (Tensor, Tensor): Cropped image and dmap.
+            (Tensor, Tensor, Tensor): Cropped image and dmap, pmap.
         """
-        if random.random() < 0.5:
-            return img, dmap
+        # if random.random() < 0.5:
+            # return img, dmap, pmap
 
         c1, h1, w1 = img.size()
         c2, h2, w2 = dmap.size()
 
         # get size of cropped dmap
         ratio = int(w1 / w2)
-        th1, tw1 = self.size
+        th1, tw1 = self.crop_size
         th2, tw2 = int(th1 / ratio), int(tw1 / ratio)
 
-        if w1 == tw1 and h1 == th1:
-            return img, dmap
+        if w1 < tw1:
+            img  = self.pad_2d(img, (0, tw1-w1, 0, 0))
+            pmap = self.pad_2d(pmap, (0, tw1-w1, 0, 0))
+            dmap = self.pad_2d(dmap, (0, tw2-w2, 0, 0))
+            w1, w2 = tw1, tw2
+        if h1 <= th1:
+            img  = self.pad_2d(img, (0, 0, 0, th1-h1))
+            pmap = self.pad_2d(pmap, (0, 0, 0, th1-h1))
+            dmap = self.pad_2d(dmap, (0, 0, 0, th2-h2))
+            h1, h2 = th1, th2
 
         x2 = random.randint(0, w2 - tw2)
         y2 = random.randint(0, h2 - th2)
         x1, y1 = int(x2*ratio), int(y2*ratio)
 
-        if self.padding == 0:
-            img1  = img[:, y1:y1+th1, x1:x1+tw1]
-            dmap1 = dmap[:, y2:y2+th2, x2:x2+tw2]
-        elif self.padding == 1:
-            img1, dmap1 = torch.zeros(img.size()), torch.zeros(dmap.size())
-            img1[:, :th1, :tw1]  = img[:, y1:y1+th1, x1:x1+tw1]
-            dmap1[:, :th2, :tw2] = dmap[:, y2:y2+th2, x2:x2+tw2]
-        elif len(self.padding) == 4:
-            img1 = img
-            dmap1 = dmap
-        else:
-            raise Exception("cannot recognize the padding method: " + str(self.padding))
+        img1  = img[:, y1:y1+th1, x1:x1+tw1]
+        dmap1 = dmap[:, y2:y2+th2, x2:x2+tw2]
+        pmap1 = pmap[:, y1:y1+th1, x1:x1+tw1]
 
-        print(img1.size(), dmap1.size())
-        return img1, dmap1
+        # print(img1.size(), dmap1.size(), pmap1.size())
+        return img1, dmap1, pmap1
