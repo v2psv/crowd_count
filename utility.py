@@ -94,7 +94,8 @@ def save_pred_result(chkp_dir, train_loss, test_loss, pred_dmap, pred_idx, sampl
             idx = sorted(np.random.permutation(num_pred)[:sample])
 
         hdf.create_dataset('img_index', data=[pred_idx[i] for i in idx])
-	for i in idx:
+        hdf.create_dataset('pred_cnt', data=np.sum(output.data.cpu().numpy(), axis=(1, 2, 3)))
+        for i in idx:
             hdf.create_dataset("pred_dmap/"+str(pred_idx[i]), data=pred_dmap[i])
 
 

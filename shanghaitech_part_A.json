@@ -6,8 +6,7 @@
     "dmap_group":"dmap_gaussRange_31_beta_0.3",
     "train_size":300,
     "test_size":182,
-    "train_batch_size":32,
-    "test_batch_size":1,
+    "train_batch_size":30,
     "img_num_channel":3,
     "img_preprocess":
     {
@@ -21,7 +20,7 @@
     }
   },
   "model":{
-    "arch":"PNET",
+    "arch":"NET1",
     "epochs":1e5,
     "use_roi":false,
     "test_freq":10,
