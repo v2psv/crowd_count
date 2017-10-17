@@ -111,14 +111,7 @@ if __name__ == "__main__":
 		# validation
 		if (e+1) % args['model']['test_freq'] == 0:
 			loss, error_mae, error_mse, test_time, pred_dmap, pred_idx = engine.validate(test_loader, model, criterion)
-<<<<<<< HEAD
 			utility.print_info(test_time=test_time, loss=loss, error_mae=error_mae, error_mse=error_mse)
-=======
-			utility.print_info(test_time=test_time,
-							   loss=loss,
-							   error_mae=error_mae,
-							   error_mse=error_mse)
->>>>>>> 3d67cbbd3c604dd4fe89e3b7b7a892c017205b6b
 			test_loss[e/args['model']['test_freq']] = [loss.avg, error_mae.avg, error_mse.avg]
 
 			utility.save_checkpoint(checkpoint_dir,

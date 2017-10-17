@@ -88,28 +88,12 @@ class RandomHorizontalFlip(object):
 
         if random.random() < 0.5:
             img_np = np.flip(img.numpy(), 2).copy()
-<<<<<<< HEAD
             img = torch.from_numpy(img_np)
 
             dmap_np = np.flip(dmap.numpy(), 2).copy()
             dmap = torch.from_numpy(dmap_np)
 
         return img, dmap
-=======
-            res.append(torch.from_numpy(img_np))
-
-            if dmap is not None:
-                dmap_np = np.flip(dmap.numpy(), 2).copy()
-                res.append(torch.from_numpy(dmap_np))
-
-            if pmap is not None:
-                pmap_np = np.flip(pmap.numpy(), 2).copy()
-                res.append(torch.from_numpy(pmap_np))
-        else:
-            res = [img, dmap, pmap]
-
-        return res
->>>>>>> 3d67cbbd3c604dd4fe89e3b7b7a892c017205b6b
 
 
 class RandomPosCrop(object):
@@ -140,31 +124,19 @@ class RandomPosCrop(object):
         c, h, w = in_matrix.size()
         matrix = torch.zeros(c, h+t+b, w+l+r)
         matrix[:, t:h+t, l:w+l] = in_matrix[:,:,:]
-<<<<<<< HEAD
 
         return matrix
 
-=======
-
-        return matrix
->>>>>>> 3d67cbbd3c604dd4fe89e3b7b7a892c017205b6b
 
 
-    def __call__(self, img, dmap, pmap):
+    def __call__(self, img, dmap):
         """
         Args:
             img (Tensor): image to be cropped.
             dmap (Tensor): density map to be cropped.
-            pmap (Tensor): perspective map to be cropped.
         Returns:
-<<<<<<< HEAD
             (Tensor, Tensor): Cropped image and dmap
-=======
-            (Tensor, Tensor, Tensor): Cropped image and dmap, pmap.
->>>>>>> 3d67cbbd3c604dd4fe89e3b7b7a892c017205b6b
         """
-        # if random.random() < 0.5:
-            # return img, dmap, pmap
 
         c1, h1, w1 = img.size()
         c2, h2, w2 = dmap.size()
@@ -176,20 +148,11 @@ class RandomPosCrop(object):
 
         if w1 < tw1:
             img  = self.pad_2d(img, (0, tw1-w1, 0, 0))
-<<<<<<< HEAD
             dmap = self.pad_2d(dmap, (0, tw2-w2, 0, 0))
             w1, w2 = tw1, tw2
 
         if h1 <= th1:
             img  = self.pad_2d(img, (0, 0, 0, th1-h1))
-=======
-            pmap = self.pad_2d(pmap, (0, tw1-w1, 0, 0))
-            dmap = self.pad_2d(dmap, (0, tw2-w2, 0, 0))
-            w1, w2 = tw1, tw2
-        if h1 <= th1:
-            img  = self.pad_2d(img, (0, 0, 0, th1-h1))
-            pmap = self.pad_2d(pmap, (0, 0, 0, th1-h1))
->>>>>>> 3d67cbbd3c604dd4fe89e3b7b7a892c017205b6b
             dmap = self.pad_2d(dmap, (0, 0, 0, th2-h2))
             h1, h2 = th1, th2
 
@@ -197,16 +160,7 @@ class RandomPosCrop(object):
         y2 = random.randint(0, h2 - th2)
         x1, y1 = int(x2*ratio), int(y2*ratio)
 
-<<<<<<< HEAD
         img  = img[:, y1:y1+th1, x1:x1+tw1]
         dmap = dmap[:, y2:y2+th2, x2:x2+tw2]
 
         return img, dmap
-=======
-        img1  = img[:, y1:y1+th1, x1:x1+tw1]
-        dmap1 = dmap[:, y2:y2+th2, x2:x2+tw2]
-        pmap1 = pmap[:, y1:y1+th1, x1:x1+tw1]
-
-        # print(img1.size(), dmap1.size(), pmap1.size())
-        return img1, dmap1, pmap1
->>>>>>> 3d67cbbd3c604dd4fe89e3b7b7a892c017205b6b

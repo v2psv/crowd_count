@@ -1,5 +1,4 @@
 UCSD:
-<<<<<<< HEAD
     MCNN: MAE:1.20, MSE:2.33, 2017-10-09_10-41-13
 
 Shanghaitech_part_A:
@@ -9,6 +8,3 @@ Shanghaitech_part_A:
     COARES_FINE1: MAE:115, MSE:168, 2017-10-17_01-10-26, 2017-10-17_13-20-59
 
     NET8: MSE: 2017-10-17_14-57-20
-=======
-  MCNN: MAE:1.20, MSE:2.33, 2017-10-09_10-41-13
->>>>>>> 3d67cbbd3c604dd4fe89e3b7b7a892c017205b6b
