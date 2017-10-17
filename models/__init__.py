@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 __all__ = []
 
 import pkgutil
@@ -12,3 +13,7 @@ for loader, name, is_pkg in pkgutil.walk_packages(__path__):
 
         globals()[name] = value
         __all__.append(name)
+=======
+from .mcnn import *
+from .pnet import *
+>>>>>>> 3d67cbbd3c604dd4fe89e3b7b7a892c017205b6b
