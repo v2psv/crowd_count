@@ -11,27 +11,34 @@ from transform_augment import Mask, RandomHorizontalFlip, RandomPosCrop, Compose
 
 class ImageFolder(data.Dataset):
 
-    def __init__(self, args, idx_list):
+    def __init__(self, args, type='train'):
         self.args = args
-        self.idx_list = sorted(idx_list)
+        self.type = type
         self.dataset_path = args['data']['dataset_path']
         self.raw_img_path = args['data']['raw_img_path']
         self.dmap_group = args['data']['dmap_group']
         self.img_num_channel = args['data']['img_num_channel']
 
-        with h5py.File(self.dataset_path) as hdf:
+        with h5py.File(self.dataset_path, 'r') as hdf:
             self.dataset_name = hdf.attrs['dataset_name']
+            if self.type == 'train':
+                self.idx_list = sorted(hdf['train_idx'][:])
+                self.augmentor = self._get_augmentor(args['data']['img_augment'])
+            else:
+                self.idx_list = sorted(hdf['test_idx'][:])
+
             self.cnt_list = hdf['raw_count'][self.idx_list].tolist()
             self.img_name_list = hdf['img_name_list'][self.idx_list]
 
             self.dmap_list = [hdf[self.dmap_group+'/'+img_name][:,:] for img_name in self.img_name_list]
             self.dmap_list = [torch.from_numpy(dmap[np.newaxis,:,:]).float() for dmap in self.dmap_list]
 
-            self.pmap_list = [hdf['pmap/'+img_name][:,:] for img_name in self.img_name_list]
-            self.pmap_list = [torch.from_numpy(pmap[np.newaxis,:,:]).float() for pmap in self.pmap_list]
-
         self.image_list = self._load_img()
-        self.augmentor = self._get_augmentor(args['data']['img_augment'])
+
+        if self.type == 'train':
+            # 'train_img_141.jpg' has a bug
+            self.image_list[140] = self.image_list[140][:, :-5, :-5]
+            self.dmap_list[140] = self.dmap_list[140][:, :-23, :-20]
 
         print('Load dataset: {}, channel: {}, # of images: {}, dmap group: {}'.format(\
             self.dataset_name, self.img_num_channel, len(self.img_name_list), self.dmap_group))
@@ -98,14 +105,13 @@ class ImageFolder(data.Dataset):
         idx = self.idx_list[index]
         img = self.image_list[index]
         dmap = self.dmap_list[index]
-        pmap = self.pmap_list[index]
         cnt = self.cnt_list[index]
         img_name = self.img_name_list[index]
 
-        img, dmap, pmap = self.augmentor(img, dmap, pmap)
+        if self.type == 'train':
+            img, dmap = self.augmentor(img, dmap)
 
-        # print(img.size(), dmap.size(), pmap.size())
-        return (idx, img, dmap, cnt, pmap)
+        return (idx, img, dmap, cnt)
 
     def __len__(self):
         """

@@ -19,15 +19,13 @@ def train(train_loader, model, criterion, optimizer):
 	model.train()
 	end = time.time()
 
-	for i, (idx, input, target, cnt, pmap) in enumerate(train_loader):
+	for i, (idx, input, target, cnt) in enumerate(train_loader):
 		batch_size = input.size(0)
-		# print(input.size(), target.size(), pmap.size())
 		input_var = torch.autograd.Variable(input, requires_grad=True).type(torch.cuda.FloatTensor)
-		input_pmap = torch.autograd.Variable(pmap, requires_grad=True).type(torch.cuda.FloatTensor)
 		target_var = torch.autograd.Variable(target.cuda(async=True)).type(torch.cuda.FloatTensor)
 
 		# compute output
-		output = model(input_var, input_pmap)
+		output = model(input_var)
 		loss = criterion(output, target_var)
 
 		# compute gradient and do SGD step
@@ -59,17 +57,16 @@ def validate(val_loader, model, criterion):
 	end = time.time()
 	pred_dmap, pred_idx = [], []
 
-	for i, (idx, input, target, cnt, pmap) in enumerate(val_loader):
+	for i, (idx, input, target, cnt) in enumerate(val_loader):
 		# batch_size = input.size(0)
 		# batch size must be 1
 		batch_size = 1
 
 		input_var = torch.autograd.Variable(input, volatile=True).type(torch.cuda.FloatTensor)
-		input_pmap = torch.autograd.Variable(pmap, requires_grad=True).type(torch.cuda.FloatTensor)
 		target_var = torch.autograd.Variable(target.cuda(async=True), volatile=True).type(torch.cuda.FloatTensor)
 
 		# compute output
-		output = model(input_var, input_pmap)
+		output = model(input_var)
 		loss = criterion(output, target_var)
 
 		pred_dmap.append(output.data.cpu().numpy()[0,:,:,:])

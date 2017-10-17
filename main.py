@@ -9,6 +9,24 @@ from datetime import datetime
 import models, engine, utility, transform
 
 
+def init_optimizer(args, model):
+	if args['model']['optimizer'] == 'SGD':
+		return torch.optim.SGD(model.parameters(),
+							lr=args['model']['learning_rate'],
+                            momentum=args['model']['momentum'],
+                            weight_decay=args['model']['weight_decay'])
+
+	elif args['model']['optimizer'] == 'Adagrad':
+		return torch.optim.Adagrad(model.parameters(),
+								lr=args['model']['learning_rate'],
+								weight_decay=args['model']['weight_decay'])
+
+	elif args['model']['optimizer'] == 'Adadelta':
+		torch.optim.Adadelta(model.parameters(),
+							lr=args['model']['learning_rate'],
+							weight_decay=args['model']['weight_decay'])
+
+
 def load_checkpoint(resume, model, optimizer, train_loss, test_loss):
 
 	if resume:
@@ -37,18 +55,15 @@ def init_dataloader(args):
 	print('Initializing data...')
 
 	with utility.Timer() as t:
-		with h5py.File(args['data']['dataset_path'], 'r') as dataset:
-			train_idx = dataset['train_idx'][:]
-			test_idx = dataset['test_idx'][:]
 
-		train_set = ImageFolder(args=args, idx_list=train_idx)
+		train_set = ImageFolder(args=args, type='train')
 		train_loader = torch.utils.data.DataLoader(train_set,
 								batch_size=args['data']['train_batch_size'],
 								shuffle=True,
 								num_workers=1,
-								pin_memory=True)
+								pin_memory=False)
 
-		test_set = ImageFolder(args=args, idx_list=test_idx)
+		test_set = ImageFolder(args=args, type='test')
 		test_loader = torch.utils.data.DataLoader(test_set,
 								batch_size=1,
 								shuffle=False,
@@ -68,16 +83,7 @@ if __name__ == "__main__":
 	model = models.__dict__[args['model']['arch']](num_channels=args['data']['img_num_channel'])
 	model = torch.nn.DataParallel(model).cuda()
 	criterion = utility.MSELoss().cuda()
-	optimizer = torch.optim.Adagrad(model.parameters(),
-									lr=args['model']['learning_rate'],
-									weight_decay=args['model']['weight_decay'])
-	# optimizer = torch.optim.SGD(model.parameters(),
-	# 							lr=args['model']['learning_rate'],
-    #                             momentum=args['model']['momentum'],
-    #                             weight_decay=args['model']['weight_decay'])
-	# optimizer = torch.optim.Adadelta(model.parameters(),
-	# 								lr=args['model']['learning_rate'],
-	# 								weight_decay=args['model']['weight_decay'])
+	optimizer = init_optimizer(args, model)
 	train_loader, test_loader = init_dataloader(args)
 
 	# (loss, mae, mse, rmse)
@@ -95,22 +101,17 @@ if __name__ == "__main__":
 	for e in range(start_epoch, args['model']['epochs']):
 		# train
 		loss, error_mae, error_mse, train_time = engine.train(train_loader, model, criterion, optimizer)
-		# lr = utility.adjust_learning_rate(optimizer, e, args['model']['learning_rate'], period=100)
+		# lr = utility.adjust_learning_rate(optimizer, e, args['model']['learning_rate'], rate=0.5, period=20)
 
 		utility.print_info(epoch=(e, args['model']['epochs']),
-						   train_time=train_time,
-						   loss=loss,
-						   error_mae=error_mae,
-						   error_mse=error_mse)
+						   train_time=train_time, loss=loss,
+						   error_mae=error_mae, error_mse=error_mse)
 		train_loss[e, :] = [loss.avg, error_mae.avg, error_mse.avg]
 
 		# validation
 		if (e+1) % args['model']['test_freq'] == 0:
 			loss, error_mae, error_mse, test_time, pred_dmap, pred_idx = engine.validate(test_loader, model, criterion)
-			utility.print_info(test_time=test_time,
-							   loss=loss,
-							   error_mae=error_mae,
-							   error_mse=error_mse)
+			utility.print_info(test_time=test_time, loss=loss, error_mae=error_mae, error_mse=error_mse)
 			test_loss[e/args['model']['test_freq']] = [loss.avg, error_mae.avg, error_mse.avg]
 
 			utility.save_checkpoint(checkpoint_dir,

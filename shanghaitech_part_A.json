@@ -3,10 +3,10 @@
     "dataset":"shanghaitech_part_A",
     "dataset_path":"/home/zhouqi/crowd_count/dataset/shanghaitech_part_A_final.h5",
     "raw_img_path":"/home/zhouqi/crowd_count/dataset/raw_data/ShanghaiTech/part_A_final/train_test_images/",
-    "dmap_group":"dmap_gaussRange_31_beta_0.3",
+    "dmap_group":"dmap_downscale_4.0_beta_0.35",
     "train_size":300,
     "test_size":182,
-    "train_batch_size":30,
+    "train_batch_size":4,
     "img_num_channel":3,
     "img_preprocess":
     {
@@ -20,13 +20,14 @@
     }
   },
   "model":{
-    "arch":"NET1",
+    "arch":"NET7",
+    "optimizer":"Adagrad",
     "epochs":1e5,
     "use_roi":false,
     "test_freq":10,
     "learning_rate":1e-2,
     "momentum":0.9,
     "weight_decay":1e-6,
-    "resume":false
+    "resume":"./checkpoint/2017-10-15_20-02-58/"
   }
 }

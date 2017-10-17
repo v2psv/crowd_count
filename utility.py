@@ -94,21 +94,34 @@ def save_pred_result(chkp_dir, train_loss, test_loss, pred_dmap, pred_idx, sampl
             idx = sorted(np.random.permutation(num_pred)[:sample])
 
         hdf.create_dataset('img_index', data=[pred_idx[i] for i in idx])
-        hdf.create_dataset('pred_cnt', data=np.sum(output.data.cpu().numpy(), axis=(1, 2, 3)))
+        hdf.create_dataset('pred_cnt', data=[np.sum(pred_dmap[i]) for i in idx])
         for i in idx:
             hdf.create_dataset("pred_dmap/"+str(pred_idx[i]), data=pred_dmap[i])
 
 
 class MSELoss(_Loss):
-    def forward(self, input, target):
+    def forward(self, pred, target):
         # _assert_no_grad(target)
-        loss = torch.sum((input - target)**2) / input.size(0)
+        loss = torch.sum((pred - target)**2) / pred.size(0)
         return loss
 
 
-def adjust_learning_rate(optimizer, epoch, base_lr, period=50):
-    """Sets the learning rate to the initial LR decayed by 10 every 30 epochs"""
-    lr = base_lr * (0.1 ** (epoch // period))
+class Dmap_Count_Loss(_Loss):
+    def forward(self, pred, target):
+        loss = torch.sum((pred - target)**2) / pred.size(0) + (torch.sum(pred) - torch.sum(target))**2
+        return loss
+
+
+class LogMSELoss(_Loss):
+    def forward(self, input, target):
+        # _assert_no_grad(target)
+        loss = torch.sum((torch.log(input) - torch.log(target))**2) / input.size(0)
+        return loss
+
+
+def adjust_learning_rate(optimizer, epoch, base_lr, rate=0.1, period=30):
+    """Sets the learning rate to the initial LR decayed by rate every period epochs"""
+    lr = base_lr * (rate ** (epoch // period))
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
     return lr

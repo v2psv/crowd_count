@@ -10,40 +10,39 @@ class NET1(nn.Module):
         self.use_pmap = use_pmap
 
         self.img_conv1_1 = nn.Sequential(
-	    	nn.Conv2d(num_channels, 32, kernel_size=9, stride=1, padding=int(9/2), bias=True),
-            nn.BatchNorm2d(32),
+	    	nn.Conv2d(num_channels, 16, kernel_size=9, stride=1, padding=int(9/2), bias=True),
+	    	nn.ReLU(inplace=True),
+            nn.Conv2d(16, 32, kernel_size=7, stride=1, padding=int(7/2), bias=True),
 	    	nn.ReLU(inplace=True),
             )
         self.img_conv1_2 = nn.Sequential(
-	    	nn.Conv2d(num_channels, 32, kernel_size=7, stride=1, padding=int(7/2), bias=True),
-            nn.BatchNorm2d(32),
+	    	nn.Conv2d(num_channels, 16, kernel_size=7, stride=1, padding=int(7/2), bias=True),
+	    	nn.ReLU(inplace=True),
+            nn.Conv2d(16, 32, kernel_size=5, stride=1, padding=int(5/2), bias=True),
 	    	nn.ReLU(inplace=True),
             )
         self.img_conv1_3 = nn.Sequential(
-	    	nn.Conv2d(num_channels, 32, kernel_size=5, stride=1, padding=int(5/2), bias=True),
-            nn.BatchNorm2d(32),
+	    	nn.Conv2d(num_channels, 16, kernel_size=5, stride=1, padding=int(5/2), bias=True),
+	    	nn.ReLU(inplace=True),
+            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=int(3/2), bias=True),
 	    	nn.ReLU(inplace=True),
             )
         self.img_conv1_pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
         self.img_conv2 = nn.Sequential(
-	    	nn.Conv2d(96, 64, kernel_size=3, stride=1, padding=int(3/2), bias=True),
-            nn.BatchNorm2d(64),
+	    	nn.Conv2d(96, 32, kernel_size=3, stride=1, padding=int(3/2), bias=True),
 	    	nn.ReLU(inplace=True),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=int(3/2), bias=True),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=int(3/2), bias=True),
 	    	nn.ReLU(inplace=True),
 	        nn.MaxPool2d(kernel_size=2, stride=2),
             )
 
         self.img_conv3 = nn.Sequential(
-	    	nn.Conv2d(64, 32, kernel_size=3, stride=1, padding=int(3/2), bias=True),
-            nn.BatchNorm2d(32),
+	    	nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=int(3/2), bias=True),
 	    	nn.ReLU(inplace=True),
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=int(3/2), bias=True),
-            nn.BatchNorm2d(32),
+            nn.Conv2d(32, 16, kernel_size=3, stride=1, padding=int(3/2), bias=True),
 	    	nn.ReLU(inplace=True),
-            nn.Conv2d(32, 1, kernel_size=1, stride=1, padding=0, bias=True),
+            nn.Conv2d(16, 1, kernel_size=1, stride=1, padding=0, bias=True),
 	    	# nn.ReLU(inplace=True),
             )
 

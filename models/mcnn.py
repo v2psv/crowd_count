@@ -51,7 +51,7 @@ class MCNN(nn.Module):
         return column
 
 
-    def forward(self, x):
+    def forward(self, x, pmap=None):
     	a = self.column1(x)
     	b = self.column2(x)
     	c = self.column3(x)
