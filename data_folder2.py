@@ -37,8 +37,8 @@ class ImageFolder(data.Dataset):
 
         if self.type == 'train':
             # 'train_img_141.jpg' has a bug
-            self.image_list[140] = self.image_list[140][:, :-5, :-5]
-            self.dmap_list[140] = self.dmap_list[140][:, :-23, :-20]
+            self.image_list[140] = self.image_list[140][:, :-23, :-20]
+            self.dmap_list[140] = self.dmap_list[140][:, :-5, :-5]
 
 
         print('Load dataset: {}, channel: {}, # of images: {}, dmap group: {}'.format(\
