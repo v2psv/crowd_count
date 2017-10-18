@@ -74,8 +74,8 @@ def validate(val_loader, model, criterion):
 		pred = np.sum(output.data.cpu().numpy())
 		truth = np.sum(target.numpy())
 
-		error_mae.update(np.mean(np.abs(pred-truth)), batch_size)
-		error_mse.update(np.mean((pred-truth)**2), batch_size)
+		error_mae.update(np.abs(pred-truth), batch_size)
+		error_mse.update((pred-truth)**2, batch_size)
 		dmap_loss.update(loss.data[0], batch_size)
 		test_time.update(time.time() - end)
 		end = time.time()
