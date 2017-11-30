@@ -4,7 +4,7 @@ import h5py
 import numpy as np
 import torch
 import torch.backends.cudnn as cudnn
-from data_folder2 import ImageFolder
+from data_folder import ImageFolder
 from datetime import datetime
 import models, engine, utility, transform
 
@@ -22,9 +22,15 @@ def init_optimizer(args, model):
 								weight_decay=args['model']['weight_decay'])
 
 	elif args['model']['optimizer'] == 'Adadelta':
-		torch.optim.Adadelta(model.parameters(),
+		return torch.optim.Adadelta(model.parameters(),
 							lr=args['model']['learning_rate'],
 							weight_decay=args['model']['weight_decay'])
+
+	elif args['model']['optimizer'] == 'Adam':
+		return torch.optim.Adam(model.parameters(),
+						lr=args['model']['learning_rate'],
+						weight_decay=args['model']['weight_decay'])
+
 
 
 def load_checkpoint(resume, model, optimizer, train_loss, test_loss):
@@ -56,17 +62,17 @@ def init_dataloader(args):
 
 	with utility.Timer() as t:
 
-		train_set = ImageFolder(args=args, type='train')
+		train_set = ImageFolder(args=args, data_type='train')
 		train_loader = torch.utils.data.DataLoader(train_set,
 								batch_size=args['data']['train_batch_size'],
 								shuffle=True,
 								num_workers=1,
-								pin_memory=False)
+								pin_memory=True)
 
-		test_set = ImageFolder(args=args, type='test')
+		test_set = ImageFolder(args=args, data_type='test')
 		test_loader = torch.utils.data.DataLoader(test_set,
 								batch_size=1,
-								shuffle=False,
+								shuffle=True,
 								num_workers=1,
 								pin_memory=True)
 	print('Initializing data loader took %ds' % t.interval)
@@ -80,9 +86,11 @@ if __name__ == "__main__":
 	args = utility.load_params(json_file=sys.argv[1])
 
 	# define model and loss function (criterion) and optimizer
-	model = models.__dict__[args['model']['arch']](num_channels=args['data']['img_num_channel'])
+	model = models.__dict__[args['model']['arch']](in_dim=args['data']['img_num_channel'],
+												   use_bn=args["model"]["use_bn"])
 	model = torch.nn.DataParallel(model).cuda()
-	criterion = utility.MSELoss().cuda()
+	train_criterion = utility.MSELoss().cuda()
+	test_criterion = utility.MSELoss().cuda()
 	optimizer = init_optimizer(args, model)
 	train_loader, test_loader = init_dataloader(args)
 
@@ -100,7 +108,7 @@ if __name__ == "__main__":
 	cudnn.benchmark = True
 	for e in range(start_epoch, args['model']['epochs']):
 		# train
-		loss, error_mae, error_mse, train_time = engine.train(train_loader, model, criterion, optimizer)
+		loss, error_mae, error_mse, train_time = engine.train(train_loader, model, train_criterion, optimizer)
 		# lr = utility.adjust_learning_rate(optimizer, e, args['model']['learning_rate'], rate=0.5, period=20)
 
 		utility.print_info(epoch=(e, args['model']['epochs']),
@@ -110,7 +118,7 @@ if __name__ == "__main__":
 
 		# validation
 		if (e+1) % args['model']['test_freq'] == 0:
-			loss, error_mae, error_mse, test_time, pred_dmap, pred_idx = engine.validate(test_loader, model, criterion)
+			loss, error_mae, error_mse, test_time, pred_dmap, pred_idx = engine.validate(test_loader, model, test_criterion)
 			utility.print_info(test_time=test_time, loss=loss, error_mae=error_mae, error_mse=error_mse)
 			test_loss[e/args['model']['test_freq']] = [loss.avg, error_mae.avg, error_mse.avg]
 

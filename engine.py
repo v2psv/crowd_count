@@ -19,18 +19,20 @@ def train(train_loader, model, criterion, optimizer):
 	model.train()
 	end = time.time()
 
-	for i, (idx, input, target, cnt) in enumerate(train_loader):
+	for i, (idx, input, target) in enumerate(train_loader):
 		batch_size = input.size(0)
-		input_var = torch.autograd.Variable(input, requires_grad=True).type(torch.cuda.FloatTensor)
-		target_var = torch.autograd.Variable(target.cuda(async=True)).type(torch.cuda.FloatTensor)
+		input_var = torch.autograd.Variable(input).type(torch.cuda.FloatTensor)
+		target_var = torch.autograd.Variable(target.cuda()).type(torch.cuda.FloatTensor)
 
 		# compute output
 		output = model(input_var)
+		# print(output.size(), target_var.size())
 		loss = criterion(output, target_var)
 
 		# compute gradient and do SGD step
 		optimizer.zero_grad()
 		loss.backward()
+		# loss.backward(weight)
 		optimizer.step()
 
 		# record info
@@ -38,6 +40,7 @@ def train(train_loader, model, criterion, optimizer):
 		truth = np.sum(target.numpy(), axis=(1, 2, 3))
 		error_mae.update(np.mean(np.abs(pred-truth)), batch_size)
 		error_mse.update(np.mean((pred-truth)**2), batch_size)
+		# dmap_loss.update(torch.sum(loss).data[0], batch_size)
 		dmap_loss.update(loss.data[0], batch_size)
 		train_time.update(time.time() - end)
 		end = time.time()
@@ -57,12 +60,12 @@ def validate(val_loader, model, criterion):
 	end = time.time()
 	pred_dmap, pred_idx = [], []
 
-	for i, (idx, input, target, cnt) in enumerate(val_loader):
+	for i, (idx, input, target) in enumerate(val_loader):
 		# batch size must be 1
 		batch_size = 1
 
 		input_var = torch.autograd.Variable(input, volatile=True).type(torch.cuda.FloatTensor)
-		target_var = torch.autograd.Variable(target.cuda(async=True), volatile=True).type(torch.cuda.FloatTensor)
+		target_var = torch.autograd.Variable(target.cuda(), volatile=True).type(torch.cuda.FloatTensor)
 
 		# compute output
 		output = model(input_var)
