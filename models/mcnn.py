@@ -20,8 +20,6 @@ class MCNN(nn.Module):
         								 ksize=[5, 3, 3, 3],
         								 stride=[1, 1, 1, 1])
         self.conv_x = nn.Conv2d(30, 1, kernel_size=1, stride=1, padding=0, bias=True)
-        # self.relu = nn.ReLU(inplace=True)
-        # self.conv_y = nn.Conv2d(10, 1, kernel_size=1, stride=1, padding=0, bias=True)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -30,7 +28,6 @@ class MCNN(nn.Module):
 
 
     def _make_column(self, in_channels, out_channels, ksize, stride):
-    	layers = []
     	column = nn.Sequential(
 	    	nn.Conv2d(in_channels[0], out_channels[0], kernel_size=ksize[0],
 	    			stride=stride[0], padding=int(ksize[0]/2), bias=True),
@@ -57,7 +54,5 @@ class MCNN(nn.Module):
     	c = self.column3(x)
     	d = torch.cat((a, b, c), 1)
     	d = self.conv_x(d)
-        # d = self.relu(d)
-        # d = self.conv_y(d)
 
         return d

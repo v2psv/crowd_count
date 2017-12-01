@@ -108,7 +108,7 @@ class MSELoss(_Loss):
         return loss
 
 class PatchMSE(_Loss):
-    def __init__(self, num_patch=[16, 16], gamma=1):
+    def __init__(self, num_patch=[16, 16], gamma=0):
         super(PatchMSE, self).__init__()
         self.num_patch = num_patch
         self.gamma = gamma
@@ -116,15 +116,17 @@ class PatchMSE(_Loss):
     def forward(self, pred, target):
         # _assert_no_grad(target)
         loss = (pred - target)**2 / pred.size(0)
+
         ksize = (loss.size(2) / self.num_patch[0], loss.size(3) / self.num_patch[1])
         pool_loss = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
         pool_truth = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
+
         patch_loss = pool_loss(loss) * ksize[0] * ksize[1]
         patch_count = pool_truth(target) * ksize[0] * ksize[1]
-        weight = (patch_loss / (patch_count + 1e-2)) ** self.gamma
 
-        return patch_loss, weight
+        patch_weight = (patch_loss / (patch_count + 1)) ** self.gamma
 
+        return patch_loss, patch_weight
 
 class L1Loss(_Loss):
     def __init__(self, size_average=True, reduce=True):
@@ -140,20 +142,6 @@ class Dmap_Count_Loss(_Loss):
         loss1 = torch.sum((pred - target)**2) / pred.size(0)
         loss2 = (torch.sum(pred) - torch.sum(target))**2
         return 10*loss1 + loss2
-
-class WMSELoss(_Loss):
-    def forward(self, pred, target):
-        # _assert_no_grad(target)
-        weight = torch.log(target + 1)
-        loss = torch.sum((pred - target)**2*weight) / pred.size(0)
-        return loss
-
-class LogMSELoss(_Loss):
-    def forward(self, input, target):
-        # _assert_no_grad(target)
-        loss = torch.sum((torch.log(input) - torch.log(target))**2) / input.size(0)
-        return loss
-
 
 def adjust_learning_rate(optimizer, epoch, base_lr, rate=0.1, period=30):
     """Sets the learning rate to the initial LR decayed by rate every period epochs"""
