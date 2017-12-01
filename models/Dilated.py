@@ -35,10 +35,10 @@ class DilationBlock(nn.Module):
         return a
 
 
-class NET8(nn.Module):
+class DilatedNet(nn.Module):
 
     def __init__(self, num_channels=3):
-        super(NET8, self).__init__()
+        super(DilatedNet, self).__init__()
 
         self.start_conv = nn.Sequential(
 	    	nn.Conv2d(num_channels, 64, kernel_size=7, stride=1, padding=int(7/2), bias=True),

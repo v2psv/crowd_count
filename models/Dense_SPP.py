@@ -8,20 +8,17 @@ class BasicBlock(nn.Module):
 
     def __init__(self, dim):
         super(BasicBlock, self).__init__()
-        self.block = nn.Sequential(
-            nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, bias=True),
-            # nn.BatchNorm2d(dim),
-            nn.LeakyReLU(negative_slope=0.1, inplace=False),
-            nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, bias=True),
-            # nn.BatchNorm2d(dim),
-            nn.LeakyReLU(negative_slope=0.1, inplace=False),
-            nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, bias=True),
-            # nn.BatchNorm2d(dim),
-            nn.LeakyReLU(negative_slope=0.1, inplace=False),
-        )
+        self.conv1 = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, bias=True)
+        self.relu1 = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, bias=True)
+        self.relu2 = nn.ReLU(inplace=True)
+        self.conv3 = nn.Conv2d(dim, dim, kernel_size=3, stride=1, padding=1, bias=True)
+        self.relu3 = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        a = self.block(x)
+        a = self.relu1(self.conv1(x))
+        a = self.relu2(self.conv2(a))
+        a = self.relu3(self.conv3(a))
 
         return a
 
@@ -29,35 +26,35 @@ class BasicBlock(nn.Module):
 class SPPBlock(nn.Module):
     def __init__(self, ksize, dim):
         super(SPPBlock, self).__init__()
-        self.down_layer = nn.Sequential(
-            nn.AvgPool2d(kernel_size=ksize, stride=ksize),
-            nn.Conv2d(dim, 16, kernel_size=3, stride=1, padding=1, bias=True),
-            nn.BatchNorm2d(16),
-            nn.LeakyReLU(negative_slope=0.1,inplace=False)
-        )
+        self.pool = nn.MaxPool2d(kernel_size=ksize, stride=ksize)
+        # self.pool = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
+        self.conv = nn.Conv2d(dim, 16, kernel_size=3, stride=1, padding=1, bias=True)
+        self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x):
+        a = self.pool(x)
+        a = self.conv(a)
+        a = self.relu(a)
+
         h, w = x.size(2), x.size(3)
-        a = self.down_layer(x)
+
         self.interp = nn.Upsample(size=(h, w), mode='bilinear')
         a = self.interp(a)
 
         return a
 
 
-class NET11(nn.Module):
+class Dense_SPP(nn.Module):
 
     def __init__(self, in_dim=3):
-        super(NET11, self).__init__()
+        super(Dense_SPP, self).__init__()
 
         self.start_conv = nn.Sequential(
 	    	nn.Conv2d(in_dim, 32, kernel_size=7, stride=1, padding=3, bias=True),
-            # nn.BatchNorm2d(32),
-	    	nn.LeakyReLU(negative_slope=0.1,inplace=False),
+	    	nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1, bias=True),
-            # nn.BatchNorm2d(64),
-            nn.LeakyReLU(negative_slope=0.1,inplace=False),
+            nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
             )
 
@@ -67,8 +64,7 @@ class NET11(nn.Module):
 
         self.transition = nn.Sequential(
 	    	nn.Conv2d(64*3, 64, kernel_size=3, stride=1, padding=1, bias=True),
-            # nn.BatchNorm2d(64),
-	    	nn.LeakyReLU(negative_slope=0.1,inplace=False),
+	    	nn.ReLU(inplace=True),
             )
 
         self.spp1 = SPPBlock(2, 64)
@@ -77,8 +73,7 @@ class NET11(nn.Module):
 
         self.last_conv = nn.Sequential(
 	    	nn.Conv2d(64 + 16*3, 64, kernel_size=3, stride=1, padding=1, bias=True),
-            # nn.BatchNorm2d(64),
-	    	nn.LeakyReLU(negative_slope=0.1,inplace=False),
+	    	nn.ReLU(inplace=True),
             nn.Conv2d(64, 1, kernel_size=1, stride=1, padding=0, bias=True),
             )
 
