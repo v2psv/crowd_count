@@ -4,6 +4,7 @@ import torch
 import numpy as np
 from scipy.misc import imresize
 from torch.nn.modules import padding
+from skimage.util import random_noise
 
 
 def pad_2d(in_matrix, size):
@@ -94,9 +95,9 @@ class Mask(object):
 
 
 class HorizontalFlip(object):
-    """Horizontally flip the given Tensor randomly with a probability of 0.5."""
+    """Horizontally flip the given Tensor."""
 
-    def __call__(self, img, dmap):
+    def __call__(self, img, dmap, rmap=None):
         """
         Args:
             img (Tensor, CHW): Image to be flipped.
@@ -109,7 +110,11 @@ class HorizontalFlip(object):
         dmap_np = np.flip(dmap.numpy(), 2).copy()
         dmap = torch.from_numpy(dmap_np)
 
-        return img, dmap
+        if rmap is not None:
+            rmap_np = np.flip(rmap.numpy(), 2).copy()
+            rmap = torch.from_numpy(rmap_np)
+
+        return img, dmap, rmap
 
 
 class RandomPosCrop(object):
@@ -121,14 +126,13 @@ class RandomPosCrop(object):
     """
 
     def __init__(self, crop_size, number=10):
+        self.number = number
         if isinstance(crop_size, numbers.Number):
             self.crop_size = (int(crop_size), int(crop_size))
         else:
             self.crop_size = crop_size
 
-        self.number = number
-
-    def get_pos(self, raw_size, crop_size):
+    def get_rand_pos(self, raw_size, crop_size):
         h1, w1 = raw_size
         h2, w2 = crop_size
 
@@ -138,7 +142,7 @@ class RandomPosCrop(object):
         return x, y
 
 
-    def __call__(self, img, dmap):
+    def __call__(self, img, dmap, rmap=None):
         """
         Args:
             img (Tensor): image to be cropped.
@@ -163,29 +167,37 @@ class RandomPosCrop(object):
         if w1 < tw1:
             img  = pad_2d(img, (0, tw1-w1, 0, 0))
             dmap = pad_2d(dmap, (0, tw2-w2, 0, 0))
+            if rmap is not None:
+                rmap = pad_2d(rmap, (0, tw2-w2, 0, 0))
             w1, w2 = tw1, tw2
 
-        if h1 <= th1:
+        if h1 < th1:
             img  = pad_2d(img, (0, 0, 0, th1-h1))
             dmap = pad_2d(dmap, (0, 0, 0, th2-h2))
+            if rmap is not None:
+                rmap = pad_2d(rmap, (0, 0, 0, th2-h2))
             h1, h2 = th1, th2
 
-        img_list, dmap_list = [], []
+        img_list, dmap_list, rmap_list = [], [], []
         for i in range(self.number):
-            x2, y2 = self.get_pos((h2, w2), (th2, tw2))
+            x2, y2 = self.get_rand_pos((h2, w2), (th2, tw2))
             x1, y1 = int(x2*ratio), int(y2*ratio)
 
             img_list.append(img[:, y1:y1+th1, x1:x1+tw1])
             dmap_list.append(dmap[:, y2:y2+th2, x2:x2+tw2])
+            if rmap is not None:
+                rmap_list.append(rmap[:, y2:y2+th2, x2:x2+tw2])
+            else:
+                rmap_list.append(None)
 
-        return img_list, dmap_list
+        return img_list, dmap_list, rmap_list
 
 
 class PaddingEX2(object):
     def __init__(self, pad_ex=4):
         self.pad_ex = pad_ex
 
-    def __call__(self, img, dmap):
+    def __call__(self, img, dmap, rmap=None):
         """
         Args:
             img (Tensor, CHW): Image to be padded.
@@ -198,16 +210,40 @@ class PaddingEX2(object):
 
         p_h = (self.pad_ex - h1 % self.pad_ex) % self.pad_ex
         p_w = (self.pad_ex - w1 % self.pad_ex) % self.pad_ex
-        if p_h != 0 or p_w != 0:
-            img_x = pad_2d(img, (0, p_w, 0, p_h))
-        else:
-            img_x = img
 
-        p_h = img_x.size(1) / ratio - h2
-        p_w = img_x.size(2) / ratio - w2
-        if p_h != 0 or p_w != 0:
-            dmap_x = pad_2d(dmap, (0, p_w, 0, p_h))
-        else:
-            dmap_x = dmap
+        if p_h == 0 and p_w == 0:
+            return img, dmap, rmap
 
-        return img_x, dmap_x
+        img = pad_2d(img, (0, p_w, 0, p_h))
+
+        p_h = img.size(1) / ratio - h2
+        p_w = img.size(2) / ratio - w2
+        dmap = pad_2d(dmap, (0, p_w, 0, p_h))
+        if rmap is not None:
+            rmap = pad_2d(rmap, (0, p_w, 0, p_h))
+
+        return img, dmap, rmap
+
+
+class RandomNoise(object):
+    def __init__(self, mode, scale_list=[0.01, 0.03, 0.05]):
+        self.scale_list = scale_list
+        self.mode = mode
+
+    def __call__(self, img):
+        """
+        Args:
+            img (Tensor, CHW): Image to add noise.
+        Returns:
+            Tensor: Noisy images.
+        """
+        img_list = []
+        for scale in self.scale_list:
+            if self.mode == 'GaussianNoise':
+                noisy_img = img + torch.from_numpy(np.random.normal(0, scale, img.size())).type(torch.FloatTensor)
+                # noisy_img = random_noise(img, mode='gaussian', seed=None, clip=True, var=scale)
+            elif self.mode == 'RandomSaltPepper':
+                noisy_img = random_noise(img, mode='s&p', seed=None, clip=True, amount=scale)
+            img_list.append(noisy_img)
+
+        return img_list

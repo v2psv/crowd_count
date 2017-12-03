@@ -2,13 +2,13 @@ import torch
 import torch.nn as nn
 import math
 import torch.nn.init
-from models.common_blocks import DownBlock, ConvBlock, BasicBlock
+from models.common_blocks import DownBlock, ConvBlock, BasicBlock, UpBlock
 
 
-class Dense_SPP(nn.Module):
+class MScale(nn.Module):
 
     def __init__(self, in_dim=3, use_bn=False, activation="ReLU"):
-        super(Dense_SPP, self).__init__()
+        super(MScale, self).__init__()
 
         self.start_conv = nn.Sequential(
             ConvBlock(in_dim, 32, ksize=7, stride=1, pad=3, use_bn=use_bn, activation=activation),
@@ -23,14 +23,12 @@ class Dense_SPP(nn.Module):
 
         self.transition = ConvBlock(64*3, 64, ksize=3, stride=1, pad=1, use_bn=use_bn, activation=activation)
 
-        self.spp1 = DownBlock(2, in_chan=64, out_chan=32, use_bn=use_bn, pool_type='avg', activation=activation)
-        self.spp2 = DownBlock(4, in_chan=64, out_chan=32, use_bn=use_bn, pool_type='avg', activation=activation)
-        self.spp3 = DownBlock(6, in_chan=64, out_chan=32, use_bn=use_bn, pool_type='avg', activation=activation)
+        self.spp1 = UpBlock(2, in_chan=64, out_chan=64, use_bn=use_bn, pool_type='max', activation=activation)
+        self.spp2 = DownBlock(2, in_chan=64, out_chan=64, use_bn=use_bn, pool_type='max', activation=activation)
 
         self.last_conv = nn.Sequential(
-            ConvBlock(64 + 32 * 3, 128, ksize=3, stride=1, pad=1, use_bn=use_bn, activation=activation),
-            ConvBlock(128, 64, ksize=3, stride=1, pad=1, use_bn=use_bn, activation=activation),
-            nn.Conv2d(64, 1, kernel_size=1, stride=1, padding=0),
+            ConvBlock(64 + 64 * 2, 128, ksize=3, stride=1, pad=1, use_bn=use_bn, activation=activation),
+            nn.Conv2d(128, 1, kernel_size=1, stride=1, padding=0),
             )
 
         for m in self.modules():
@@ -51,8 +49,7 @@ class Dense_SPP(nn.Module):
         a = self.transition(a)
         x = self.spp1(a)
         y = self.spp2(a)
-        z = self.spp3(a)
-        a = torch.cat([a, x, y, z], 1)
+        a = torch.cat([a, x, y], 1)
         a = self.last_conv(a)
 
         return a
