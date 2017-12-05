@@ -1,5 +1,5 @@
 # -*- coding:utf-8 -*-
-import h5py, os
+import h5py, os, sys
 import json
 import time
 import torch
@@ -7,6 +7,7 @@ import numpy as np
 from torch.nn.modules.loss import _Loss
 import torch.nn.functional as F
 from torch import nn
+from shutil import copyfile
 
 
 class AverageMeter(object):
@@ -26,6 +27,20 @@ class AverageMeter(object):
         self.count += n
         self.avg = self.sum / self.count
 
+class Tee(object):
+    def __init__(self, name, mode):
+        self.file = open(name, mode)
+        self.stdout = sys.stdout
+        sys.stdout = self
+    def __del__(self):
+        sys.stdout = self.stdout
+        self.file.close()
+    def write(self, data):
+        self.file.write(data)
+        self.stdout.write(data)
+    def flush(self):
+        self.file.flush()
+
 
 def print_info(epoch=None, train_time=None, test_time=None, \
                 dmap_loss=None, contex_loss=None, error_mae=None, \
@@ -42,9 +57,9 @@ def print_info(epoch=None, train_time=None, test_time=None, \
     if test_time is not None:
         str = str + 'TestTime {test_time.sum:.3f}   '.format(test_time=test_time)
     if dmap_loss is not None:
-        str = str + 'Loss {dmap_loss.avg:.5f}   '.format(dmap_loss=dmap_loss)
+        str = str + 'Density Loss {dmap_loss.avg:.5f}   '.format(dmap_loss=dmap_loss)
     if contex_loss is not None:
-        str = str + 'Loss {contex_loss.avg:.5f}   '.format(contex_loss=contex_loss)
+        str = str + 'Contex Loss {contex_loss.avg:.5f}   '.format(contex_loss=contex_loss)
     if error_mae is not None and error_mse is not None:
         rmse = np.sqrt(error_mse.avg)
         str = str + 'Error [{error_mae.avg:.3f} {error_mse.avg:.3f} {rmse:.3f}]   '\
@@ -69,6 +84,9 @@ def save_args(chkp_dir, args):
 
     with open(chkp_dir+'/parameters.json', 'w') as fp:
         json.dump(args, fp)
+
+    model = args['model']['arch'] + '.py'
+    copyfile('models/' + model, chkp_dir + '/'  + model)
 
 
 def save_checkpoint(chkp_dir, stats, mode='newest'):
@@ -116,31 +134,57 @@ class MSELoss(_Loss):
         loss = torch.sum((pred - target)**2) / pred.size(0)
         return loss
 
-class PatchMSE(_Loss):
-    def __init__(self, num_patch=[8, 8], epsilon=1, gamma=2):
-        super(PatchMSE, self).__init__()
-        self.num_patch = num_patch
+class CrossEntropyLoss2d(nn.Module):
+    def __init__(self, weight=None, size_average=True, ignore_index=255):
+        super(CrossEntropyLoss2d, self).__init__()
+        self.nll_loss = nn.NLLLoss2d(weight, size_average, ignore_index)
+
+    def forward(self, inputs, targets):
+        return self.nll_loss(F.log_softmax(inputs), targets)
+
+
+class ContexFocalLoss2d(nn.Module):
+    def __init__(self, gamma=2, weight=None, size_average=True, ignore_index=255):
+        super(ContexFocalLoss2d, self).__init__()
+        self.gamma = gamma
+        self.nll_loss = nn.NLLLoss2d(weight, size_average, ignore_index)
+
+    def forward(self, inputs, targets):
+        return self.nll_loss((1 - F.softmax(inputs)) ** self.gamma * F.log_softmax(inputs), targets)
+
+
+class DmapFocalLoss2d(nn.Module):
+    def __init__(self, gamma=2, epsilon=0.1, num_patch=[8, 8]):
+        super(DmapFocalLoss2d, self).__init__()
         self.gamma = gamma
         self.epsilon = epsilon
+        self.num_patch = num_patch
 
-    def forward(self, pred, target):
-        # _assert_no_grad(target)
-        loss = (pred - target)**2 / pred.size(0)
+    def forward(self, inputs, targets):
+        l2loss = (inputs - targets)**2
+        # loss = (pred - target)**2 / pred.size(0) is wrong !!!
+        # do not use average loss over batch, because patches in each sample have
+        # different loss, so should use different weights
 
-        ksize = (loss.size(2) / self.num_patch[0], loss.size(3) / self.num_patch[1])
-        pool_loss = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
+        ksize = (inputs.size(2) / self.num_patch[0], inputs.size(3) / self.num_patch[1])
+
+        pool_x = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
+        patch_loss = pool_x(l2loss) * ksize[0] * ksize[1]
+        patch_targets = pool_x(targets) * ksize[0] * ksize[1]
+
         pool_pred = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
-        pool_truth = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
+        patch_pred = pool_pred(inputs) * ksize[0] * ksize[1]
 
-        patch_loss = pool_loss(loss) * ksize[0] * ksize[1]
-        patch_pred = pool_pred(pred) * ksize[0] * ksize[1]
-        patch_count = pool_truth(target) * ksize[0] * ksize[1]
+        patch_weight = (torch.abs(patch_pred - patch_targets) / (patch_targets + self.epsilon)) ** self.gamma
 
-        patch_weight = (torch.abs(patch_pred - patch_count) / (patch_count + self.epsilon)) ** self.gamma
         patch_weight = patch_weight / torch.sum(patch_weight).data[0]
         patch_weight = torch.autograd.Variable(patch_weight.data, requires_grad=False)
 
-        return patch_loss, patch_weight
+
+        weight = l2loss / ((targets + self.epsilon)**2) + targets
+        weight = torch.autograd.Variable(weight.data, requires_grad=False)
+
+        return torch.sum(weight * l2loss)
 
 
 class CrossEntropy2d(nn.Module):
@@ -174,75 +218,25 @@ class CrossEntropy2d(nn.Module):
 
 
 class DmapContexLoss(_Loss):
-    def __init__(self, num_patch=[8, 8], epsilon=1, gamma=2):
+    def __init__(self, weight=None, border=0):
         super(DmapContexLoss, self).__init__()
-        self.contex_criterion = CrossEntropy2d()
+        # self.weight = torch.from_numpy(weight).type(torch.cuda.FloatTensor)
+        self.contex_criterion = ContexFocalLoss2d()
         self.dmap_criterion = MSELoss()
-
-    def forward(self, pred_dmap, pred_contex, target_dmap, target_contex, weight=None):
-        dmap_loss = self.dmap_criterion(pred_dmap, target_dmap)
-        b, n, h, w = target_contex.size()
-        contex_loss = self.contex_criterion(pred_contex, target_contex.view(b, h, w), weight)
-        dmap_contex_loss = dmap_loss + contex_loss
-
-        return dmap_loss, contex_loss, dmap_contex_loss
-
-'''
-class Patch_dmap_contex_loss(_Loss):
-    def __init__(self, class_weight=None, num_patch=[8, 8], epsilon=1, gamma=2):
-        super(PatchMSE, self).__init__()
-        self.num_patch = num_patch
-        self.gamma = gamma
-        self.epsilon = epsilon
-
-        self.contex_criterion = CrossEntropyLoss2d(class_weight)
-
-    def get_dmap_patch_weight(pred, target):
-        ksize = (pred.size(2) / self.num_patch[0], pred.size(3) / self.num_patch[1])
-
-        pool_loss = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
-
-        pool_pred = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
-        pool_truth = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
-
+        self.border = border
 
     def forward(self, pred_dmap, pred_contex, target_dmap, target_contex):
-        dmap_loss = (pred_map - target_dmap)**2 / pred_map.size(0)
+        if self.border != 0:
+            pred_contex = pred_contex[:,:,self.border:-self.border,self.border:-self.border]
+            target_contex = target_contex[:,:,self.border:-self.border,self.border:-self.border]
+        b, n, h, w = target_contex.size()
+        target_contex = target_contex.contiguous().view(b, h, w)
 
+        dmap_loss = self.dmap_criterion(pred_dmap, target_dmap)
+        contex_loss = self.contex_criterion(pred_contex, target_contex)
+        dmap_contex_loss = dmap_loss + 10*contex_loss
 
-
-        patch_dmap_loss = pool_dmap_loss(dmap_loss) * ksize[0] * ksize[1]
-        patch_pred_map = pool_pred_map(pred_map) * ksize[0] * ksize[1]
-        patch_count = pool_truth(target_dmap) * ksize[0] * ksize[1]
-
-        patch_weight = (torch.abs(patch_pred_map - patch_count) / (patch_count + self.epsilon)) ** self.gamma
-        patch_weight = patch_weight / torch.sum(patch_weight).data[0]
-        patch_weight = torch.autograd.Variable(patch_weight.data, requires_grad=False)
-
-        return patch_dmap_loss, patch_weight
-'''
-
-class PatchL1(_Loss):
-    def __init__(self, num_patch=[16, 16], gamma=1):
-        super(PatchMSE, self).__init__()
-        self.num_patch = num_patch
-        self.gamma = gamma
-
-    def forward(self, pred, target):
-        # _assert_no_grad(target)
-        loss = F.l1_loss(pred, target, size_average=self.size_average)
-
-        ksize = (loss.size(2) / self.num_patch[0], loss.size(3) / self.num_patch[1])
-        pool_loss = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
-        pool_truth = nn.AvgPool2d(kernel_size=ksize, stride=ksize)
-
-        patch_loss = pool_loss(loss) * ksize[0] * ksize[1]
-        patch_count = pool_truth(target) * ksize[0] * ksize[1]
-        patch_count = torch.autograd.Variable(patch_count.data, requires_grad=False)
-
-        patch_weight = (patch_loss / (patch_count + 1)) ** self.gamma
-
-        return patch_loss, patch_weight / torch.sum(patch_weight)
+        return dmap_loss, contex_loss, dmap_contex_loss
 
 
 class L1Loss(_Loss):
@@ -254,11 +248,6 @@ class L1Loss(_Loss):
         # _assert_no_grad(target)
         return F.l1_loss(input, target, size_average=self.size_average)
 
-class Dmap_Count_Loss(_Loss):
-    def forward(self, pred, target):
-        loss1 = torch.sum((pred - target)**2) / pred.size(0)
-        loss2 = (torch.sum(pred) - torch.sum(target))**2
-        return 10*loss1 + loss2
 
 def adjust_learning_rate(optimizer, epoch, base_lr, rate=0.1, period=30):
     """Sets the learning rate to the initial LR decayed by rate every period epochs"""

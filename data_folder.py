@@ -82,11 +82,10 @@ class ImageFolder(data.Dataset):
             noise = RandomNoise('GaussianNoise', scale_list=process_dict["GaussianNoise"])
             noisy_result = [noise(img) for img in img_list]
 
-            img_list = []
             for i, noisy_img_list in enumerate(noisy_result):
                 img_list.extend(noisy_img_list)
-            dmap_list = [dmap for dmap in dmap_list for i in range(num_scale)]
-            rmap_list = [rmap for rmap in rmap_list for i in range(num_scale)]
+            dmap_list.extend([dmap for dmap in dmap_list for i in range(num_scale)])
+            rmap_list.extend([rmap for rmap in rmap_list for i in range(num_scale)])
 
         if "HorizontalFlip" in process_dict:
             flip = HorizontalFlip()

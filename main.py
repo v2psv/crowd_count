@@ -49,8 +49,8 @@ def load_checkpoint(resume, model, optimizer, train_loss, test_loss):
 		with h5py.File(resume + '/result.h5', 'r') as hdf:
 			train_loss_t = hdf['train_loss'][:, :]
 			test_loss_t = hdf['test_loss'][:, :]
-        	train_loss[:train_loss_t.shape[0],:] = train_loss_t[:, :]
-        	test_loss[:test_loss_t.shape[0], :] = test_loss_t[:, :]
+			train_loss[:train_loss_t.shape[0],:] = train_loss_t[:, :]
+			test_loss[:test_loss_t.shape[0], :] = test_loss_t[:, :]
 
 		print("=> loaded checkpoint '{}' (epoch {})".format(resume, start_epoch))
 		print("latest train loss [{}, {}, {}], test loss [{}, {}, {}]".format(\
@@ -95,7 +95,7 @@ if __name__ == "__main__":
 												   use_bn=args["model"]["use_bn"],
 												   activation=args["model"]["activation"])
 	model = torch.nn.DataParallel(model).cuda()
-	train_criterion = utility.DmapContexLoss().cuda()
+	train_criterion = utility.DmapContexLoss(border=16).cuda()
 	test_criterion = utility.DmapContexLoss().cuda()
 	optimizer = init_optimizer(args, model)
 	train_loader, test_loader = init_dataloader(args)
@@ -110,6 +110,7 @@ if __name__ == "__main__":
 	best_test_mse = 9999999
 	checkpoint_dir = './checkpoint/' + datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 	utility.save_args(checkpoint_dir, args)
+	logger = utility.Tee(checkpoint_dir + '/log.txt', 'a')
 
 	# start train
 	cudnn.benchmark = True
