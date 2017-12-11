@@ -44,7 +44,7 @@ class Tee(object):
 
 def print_info(epoch=None, train_time=None, test_time=None, \
                 dmap_loss=None, contex_loss=None, error_mae=None, \
-                error_mse=None, lr=None):
+                error_mse=None, lr=None, loss_record=None):
     """
     epoch: tuple (epoch index, total number of epochs)
     train_time, test_time, dmap_loss, error_mae, error_mse, error_rmse: AverageMeter objects
@@ -59,7 +59,9 @@ def print_info(epoch=None, train_time=None, test_time=None, \
     if dmap_loss is not None:
         str = str + 'Density Loss {dmap_loss.avg:.5f}   '.format(dmap_loss=dmap_loss)
     if contex_loss is not None:
-        str = str + 'Contex Loss {contex_loss.avg:.5f}   '.format(contex_loss=contex_loss)
+        str = str + 'Context Loss {contex_loss.avg:.5f}   '.format(contex_loss=contex_loss)
+    if loss_record is not None:
+        str = str + 'Loss {loss_record.avg:.5f}   '.format(loss_record=loss_record)
     if error_mae is not None and error_mse is not None:
         rmse = np.sqrt(error_mse.avg)
         str = str + 'Error [{error_mae.avg:.3f} {error_mse.avg:.3f} {rmse:.3f}]   '\
@@ -101,7 +103,7 @@ def save_checkpoint(chkp_dir, stats, mode='newest'):
     torch.save(stats, chkp_file)
 
 
-def save_pred_result(chkp_dir, train_loss, test_loss, pred_dmap, pred_contex, pred_idx, sample=0, mode='newest'):
+def save_pred_result(chkp_dir, train_loss, test_loss, pred_dmap=None, pred_contex=None, pred_perspective=None, pred_idx=None, sample=0, mode='newest'):
     if not os.path.exists(chkp_dir):
         os.makedirs(chkp_dir)
 
@@ -110,7 +112,7 @@ def save_pred_result(chkp_dir, train_loss, test_loss, pred_dmap, pred_contex, pr
     elif mode == 'best':
         result_file = chkp_dir + '/best_result.h5'
 
-    num_pred = len(pred_dmap)
+    num_pred = len(pred_idx)
 
     with h5py.File(result_file, 'w') as hdf:
         hdf.create_dataset("train_loss", data=train_loss)
@@ -121,17 +123,27 @@ def save_pred_result(chkp_dir, train_loss, test_loss, pred_dmap, pred_contex, pr
         else:
             idx = sorted(np.random.permutation(num_pred)[:sample])
 
-        hdf.create_dataset('img_index', data=[pred_idx[i] for i in idx])
-        hdf.create_dataset('pred_cnt', data=[np.sum(pred_dmap[i]) for i in idx])
-        for i in idx:
-            hdf.create_dataset("pred_dmap/"+str(pred_idx[i]), data=pred_dmap[i])
-            hdf.create_dataset("pred_contex/"+str(pred_idx[i]), data=pred_contex[i])
-
+        if pred_idx is not None:
+            hdf.create_dataset('img_index', data=[pred_idx[i] for i in idx])
+        if pred_dmap is not None and pred_contex is not None:
+            hdf.create_dataset('pred_cnt', data=[np.sum(pred_dmap[i]) for i in idx])
+            for i in idx:
+                hdf.create_dataset("pred_dmap/"+str(pred_idx[i]), data=pred_dmap[i])
+                hdf.create_dataset("pred_contex/"+str(pred_idx[i]), data=pred_contex[i])
+        if pred_perspective is not None:
+            for i in idx:
+                hdf.create_dataset("pred_perspective/"+str(pred_idx[i]), data=pred_perspective[i])
 
 class MSELoss(_Loss):
     def forward(self, pred, target):
         # _assert_no_grad(target)
         loss = torch.sum((pred - target)**2) / pred.size(0)
+        return loss
+
+class L1Loss(_Loss):
+    def forward(self, pred, target):
+        # _assert_no_grad(target)
+        loss = torch.sum(torch.abs(pred - target)) / pred.size(0)
         return loss
 
 class CrossEntropyLoss2d(nn.Module):
@@ -144,7 +156,7 @@ class CrossEntropyLoss2d(nn.Module):
 
 
 class ContexFocalLoss2d(nn.Module):
-    def __init__(self, gamma=2, weight=None, size_average=True, ignore_index=255):
+    def __init__(self, gamma=4, weight=None, size_average=True, ignore_index=255):
         super(ContexFocalLoss2d, self).__init__()
         self.gamma = gamma
         self.nll_loss = nn.NLLLoss2d(weight, size_average, ignore_index)
@@ -234,19 +246,9 @@ class DmapContexLoss(_Loss):
 
         dmap_loss = self.dmap_criterion(pred_dmap, target_dmap)
         contex_loss = self.contex_criterion(pred_contex, target_contex)
-        dmap_contex_loss = dmap_loss + 10*contex_loss
+        dmap_contex_loss = dmap_loss + 20*contex_loss
 
         return dmap_loss, contex_loss, dmap_contex_loss
-
-
-class L1Loss(_Loss):
-    def __init__(self, size_average=True, reduce=True):
-        super(L1Loss, self).__init__(size_average)
-        self.reduce = reduce
-
-    def forward(self, input, target):
-        # _assert_no_grad(target)
-        return F.l1_loss(input, target, size_average=self.size_average)
 
 
 def adjust_learning_rate(optimizer, epoch, base_lr, rate=0.1, period=30):

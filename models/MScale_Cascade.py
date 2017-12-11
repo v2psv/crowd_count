@@ -6,7 +6,7 @@ from models.common_blocks import DownBlock, ConvBlock, BasicBlock, UpBlock
 
 
 class ContexModule(nn.Module):
-    def __init__(self, in_dim, n_class, use_bn=False, activation="ReLU"):
+    def __init__(self, in_dim, n_class, use_bn=True, activation="ReLU"):
         super(ContexModule, self).__init__()
 
         self.down_block = nn.Sequential(
@@ -50,11 +50,11 @@ class ReceptiveModule(nn.Module):
 
         return a
 
-
 class MScale_Cascade(nn.Module):
-    def __init__(self, in_dim=3, use_bn=False, activation="ReLU", use_contex=True, n_class=5):
+    def __init__(self, in_dim=3, use_bn=False, activation="ReLU", use_contex=True, use_perspective=True, n_class=5):
         super(MScale_Cascade, self).__init__()
         self.use_contex = use_contex
+        self.use_perspective = use_perspective
 
         self.start_conv = nn.Sequential(
             ConvBlock(in_dim, 32, ksize=7, stride=1, pad=3, use_bn=use_bn, activation=activation),
@@ -70,15 +70,16 @@ class MScale_Cascade(nn.Module):
                                     nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2))
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
+        feature_dim = 64 * 3
+        if use_perspective:
+            feature_dim += 1
         if use_contex:
-            self.contex_block = ContexModule(64*3, n_class, use_bn=use_bn, activation=activation)
-            last_conv_in = 64 * 3 + n_class
-        else:
-            last_conv_in = 64 * 3
+            self.contex_block = ContexModule(feature_dim, n_class, use_bn=use_bn, activation=activation)
+            feature_dim += n_class
 
         use_bn = False
         self.last_conv = nn.Sequential(
-            ConvBlock(last_conv_in, 64, ksize=3, stride=1, pad=1, use_bn=use_bn, activation=activation),
+            ConvBlock(feature_dim, 64, ksize=3, stride=1, pad=1, use_bn=use_bn, activation=activation),
             ConvBlock(64, 64, ksize=3, stride=1, pad=1, use_bn=use_bn, activation=activation),
             ConvBlock(64, 64, ksize=3, stride=1, pad=1, use_bn=use_bn, activation=activation),
             nn.Conv2d(64, 1, kernel_size=1, stride=1, padding=0),
@@ -92,7 +93,7 @@ class MScale_Cascade(nn.Module):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
 
-    def forward(self, img):
+    def forward(self, img, perspective=None):
         a = self.start_conv(img)
         x = self.block1(a)
         y = self.block2(x)
@@ -100,12 +101,15 @@ class MScale_Cascade(nn.Module):
         x = self.pool(x)
 
         b = torch.cat([x, y, z], 1)
-        c = self.contex_block(b)
+
+        if self.use_perspective and perspective is not None:
+            b = torch.cat([b, perspective], 1)
 
         if self.use_contex:
+            c = self.contex_block(b)
             b = torch.cat([b, c], 1)
             a = self.last_conv(b)
+            return a, c
         else:
             a = self.last_conv(b)
-
-        return a, c
+            return a

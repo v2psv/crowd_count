@@ -32,7 +32,7 @@ def init_optimizer(args, model):
 						weight_decay=args['model']['weight_decay'])
 
 	elif args['model']['optimizer'] == 'RMSprop':
-		return torch.optim.RMSprop(model.parameters(),
+		return torch.optim.RMSprop(filter(lambda p: p.requires_grad, model.parameters()),
 						lr=args['model']['learning_rate'],
 						weight_decay=args['model']['weight_decay'])
 
@@ -53,9 +53,8 @@ def load_checkpoint(resume, model, optimizer, train_loss, test_loss):
 			test_loss[:test_loss_t.shape[0], :] = test_loss_t[:, :]
 
 		print("=> loaded checkpoint '{}' (epoch {})".format(resume, start_epoch))
-		print("latest train loss [{}, {}, {}], test loss [{}, {}, {}]".format(\
-			train_loss_t[-1,0], train_loss_t[-1,1], train_loss_t[-1,2], \
-			test_loss_t[-1,0], test_loss_t[-1,1], test_loss_t[-1,2]))
+		print("latest train loss [{}], test loss [{}]".format(\
+			train_loss_t[-1,0], test_loss_t[-1,0]))
 	else:
 		start_epoch = 0
 
@@ -84,23 +83,21 @@ if __name__ == "__main__":
 	args = utility.load_params(json_file=sys.argv[1])
 
 	# define model and loss function (criterion) and optimizer
-	model = models.__dict__[args['model']['arch']](in_dim=args['data']['img_num_channel'],
-												   use_bn=args["model"]["use_bn"],
-												   activation=args["model"]["activation"])
+	model = models.__dict__[args['model']['arch']](activation=args["model"]["activation"])
 	model = torch.nn.DataParallel(model).cuda()
-	train_criterion = utility.DmapContexLoss().cuda()
-	test_criterion = utility.DmapContexLoss().cuda()
+	train_criterion = utility.L1Loss().cuda()
+	test_criterion = utility.L1Loss().cuda()
 	optimizer = init_optimizer(args, model)
 	train_loader, test_loader = init_dataloader(args)
 
 	# (loss, mae, mse, rmse)
 	args['model']['epochs'] = int(args['model']['epochs'])
-	train_loss = np.zeros((args['model']['epochs'], 4))
-	test_loss  = np.zeros((args['model']['epochs'] / args['model']['test_freq'], 4))
+	train_loss = np.zeros((args['model']['epochs'], 1))
+	test_loss  = np.zeros((args['model']['epochs'] / args['model']['test_freq'], 1))
 	start_epoch = load_checkpoint(args['model']['resume'], model, optimizer, train_loss, test_loss)
 
 	# save args
-	best_test_mse = 9999999
+	best_loss = 9999999
 	checkpoint_dir = './checkpoint/' + datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
 	utility.save_args(checkpoint_dir, args)
 	logger = utility.Tee(checkpoint_dir + '/log.txt', 'a')
@@ -109,31 +106,25 @@ if __name__ == "__main__":
 	cudnn.benchmark = True
 	for e in range(start_epoch, args['model']['epochs']):
 		# train
-		ret = engine.train(train_loader, model, train_criterion, optimizer)
-		dmap_loss, contex_loss, error_mae, error_mse, train_time = ret
-		# lr = utility.adjust_learning_rate(optimizer, e, args['model']['learning_rate'], rate=0.5, period=20)
+		loss_record, train_time_record = engine.train_perspective(train_loader, model, train_criterion, optimizer)
 
-		utility.print_info(epoch=(e, args['model']['epochs']), train_time=train_time,
-						   dmap_loss=dmap_loss, contex_loss=contex_loss,
-						   error_mae=error_mae, error_mse=error_mse)
-		train_loss[e, :] = [dmap_loss.avg, contex_loss.avg, error_mae.avg, error_mse.avg]
+		utility.print_info(epoch=(e, args['model']['epochs']), train_time=train_time_record, loss_record=loss_record)
+		train_loss[e, 0] = loss_record.avg
 
 		# validation
 		if (e+1) % args['model']['test_freq'] == 0:
-			ret = engine.validate(test_loader, model, test_criterion)
-			dmap_loss, contex_loss, error_mae, error_mse, test_time, pred_dmap, pred_contex, pred_idx = ret
+			loss_record, test_time_record, result, result_idx = engine.validate_perspective(test_loader, model, test_criterion)
+			# dmap_loss, contex_loss, error_mae, error_mse, test_time, pred_dmap, pred_contex, pred_idx = ret
 
-			utility.print_info(test_time=test_time, dmap_loss=dmap_loss,
-							   contex_loss=contex_loss, error_mae=error_mae,
-							   error_mse=error_mse)
-			test_loss[e/args['model']['test_freq']] = [dmap_loss.avg, contex_loss.avg, error_mae.avg, error_mse.avg]
+			utility.print_info(test_time=test_time_record, loss_record=loss_record)
+			test_loss[e/args['model']['test_freq'], 0] = loss_record.avg
 
 			status = {'epoch': e, 'arch': args['model']['arch'], 'state_dict': model.state_dict(), 'optimizer' : optimizer.state_dict()}
 
 			utility.save_checkpoint(checkpoint_dir, status, mode='newest')
-			utility.save_pred_result(checkpoint_dir, train_loss[:e,:], test_loss[:e/args['model']['test_freq'],:], pred_dmap, pred_contex, pred_idx, sample=20, mode='newest')
-			if error_mse.avg < best_test_mse:
-				best_test_mse = error_mse.avg
+			utility.save_pred_result(checkpoint_dir, train_loss[:e,:], test_loss[:e/args['model']['test_freq'],:], pred_perspective=result, pred_idx=result_idx, sample=20, mode='newest')
+			if loss_record.avg < best_loss:
+				best_loss = loss_record.avg
 				print('----------------------[Best MSE !]----------------------')
 				utility.save_checkpoint(checkpoint_dir, status, mode='best')
-				utility.save_pred_result(checkpoint_dir, train_loss[:e,:], test_loss[:e/args['model']['test_freq'],:], pred_dmap, pred_contex, pred_idx, mode='best')
+				utility.save_pred_result(checkpoint_dir, train_loss[:e,:], test_loss[:e/args['model']['test_freq'],:], pred_perspective=result, pred_idx=result_idx, mode='best')

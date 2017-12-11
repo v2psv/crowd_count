@@ -142,7 +142,7 @@ class RandomPosCrop(object):
         return x, y
 
 
-    def __call__(self, img, dmap, rmap=None):
+    def __call__(self, img, dmap, rmap=None, border=8):
         """
         Args:
             img (Tensor): image to be cropped.
@@ -197,32 +197,26 @@ class PaddingEX2(object):
     def __init__(self, pad_ex=4):
         self.pad_ex = pad_ex
 
-    def __call__(self, img, dmap, rmap=None):
+    def __call__(self, img, label_list=[], ratio=None):
         """
         Args:
             img (Tensor, CHW): Image to be padded.
         Returns:
             Tensor: padded image.
         """
-        c1, h1, w1 = img.size()
-        c2, h2, w2 = dmap.size()
-        ratio = int(w1 / w2)
-
-        p_h = (self.pad_ex - h1 % self.pad_ex) % self.pad_ex
-        p_w = (self.pad_ex - w1 % self.pad_ex) % self.pad_ex
+        c, h, w = img.size()
+        p_h = (self.pad_ex - h % self.pad_ex) % self.pad_ex
+        p_w = (self.pad_ex - w % self.pad_ex) % self.pad_ex
 
         if p_h == 0 and p_w == 0:
-            return img, dmap, rmap
+            return [img] + label_list
 
         img = pad_2d(img, (0, p_w, 0, p_h))
+        if len(label_list) != 0:
+            c, h, w = img.size()
+            label_list = [pad_2d(label, (0, w/ratio-label.size(2), 0, h/ratio-label.size(1))) for label in label_list]
 
-        p_h = img.size(1) / ratio - h2
-        p_w = img.size(2) / ratio - w2
-        dmap = pad_2d(dmap, (0, p_w, 0, p_h))
-        if rmap is not None:
-            rmap = pad_2d(rmap, (0, p_w, 0, p_h))
-
-        return img, dmap, rmap
+        return [img] + label_list
 
 
 class RandomNoise(object):
@@ -247,3 +241,10 @@ class RandomNoise(object):
             img_list.append(noisy_img)
 
         return img_list
+
+class Resize(object):
+    def __init__(self, size=[256, 256]):
+        self.size = size
+
+    def __call__(self, img):
+        return torch.from_numpy(imresize(img.numpy(), self.size))

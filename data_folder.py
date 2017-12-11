@@ -1,119 +1,171 @@
 # -*- coding:utf-8 -*-
-import os, h5py, gc
+import os, h5py, gc, random
 import numpy as np
-import PIL
+import PIL, numbers
 import torch
 import torch.utils.data as data
 from torchvision import transforms
 from scipy.misc import imresize
-from transform_augment import Mask, HorizontalFlip, RandomPosCrop, Compose, ToTensor, PaddingEX2, RandomNoise
+from transform_augment import ToTensor, PaddingEX2
+
+def load_img(path, img_num_channel):
+    if img_num_channel == 1:
+        return PIL.Image.open(path).convert('L')
+    elif img_num_channel == 3:
+        return PIL.Image.open(path).convert('RGB')
+
+def pad2d_max(tensor, height, width):
+    '''
+    input:
+        tensor: 3D tensor, C*H*W
+        height, width: maximum height and width,
+        if H larger than height, then it's no need to padding
+    '''
+    c, h, w = tensor.size()
+    pad_h, pad_w = max(height - h, 0), max(width - w, 0)
+    if pad_h == 0 and pad_w == 0:
+        return tensor.float()
+    else:
+        p_tensor = torch.zeros(c, h+pad_h, w+pad_w)
+        p_tensor[:, 0:h, 0:w] = tensor[:,:,:]
+        return p_tensor.float()
+
+def get_patches(idx, pos, patch_h, patch_w):
+    '''
+    get positions of patches
+    return: N*5 array: image_id, left, top, right, bottom
+    '''
+    patches = np.zeros((pos.shape[0], 5))
+    patches[:, 0] = idx
+    patches[:, 1:3] = pos[:, :]
+    patches[:, 3] = pos[:, 0] + patch_w
+    patches[:, 4] = pos[:, 1] + patch_h
+
+    return patches.astype(int)
 
 
-class ImageFolder(data.Dataset):
+class DataFolder(data.Dataset):
+    def __init__(self, args, mode='train'):
+        assert mode in ['train', 'test']
+        assert args['model']['target'] in ['Density_Context', 'Perspective']
 
-    def __init__(self, args, data_type='train'):
+        self.target = args['model']['target']
+        self.mode = mode
 
         dataset_path = args['data']['dataset_path']
-        with h5py.File(dataset_path, 'r') as hdf:
-            dataset_name = hdf.attrs['dataset_name']
-            if data_type == 'train':
-                raw_cnt_list = hdf['train_count'][:].tolist()
-                img_name_list = hdf['train_img_name'][:]
-                process_dict = args['data']['train_img_process']
-            elif data_type == 'test':
-                raw_cnt_list = hdf['test_count'][:].tolist()
-                img_name_list = hdf['test_img_name'][:]
-                process_dict = args['data']['test_img_process']
-            else:
-                raise Exception("Undefined data type: " + data_type)
-
-        self.dmap_list = self._load_dataset(dataset_path, args['data']['dmap_group'], img_name_list)
-        self.rmap_list = self._load_dataset(dataset_path, args['data']['rmap_group'], img_name_list)
-
         raw_img_path = args['data']['raw_img_path']
         img_num_channel = args['data']['img_num_channel']
-        self.image_list = self._load_img(img_name_list, raw_img_path, img_num_channel)
-        self.image_list, self.dmap_list, self.rmap_list = self._preprocess(process_dict)
-        self.sample_number = len(self.image_list)
+        patch_size = args['data']['patch_size']
+        downscale = args['data']['downscale']
 
-        print('Load dataset: {}, channel: {}, # of images: {}, # of samples: {}, label: {}'.format(\
-                dataset_name, img_num_channel, len(img_name_list), self.sample_number, args['data']['dmap_group']))
-
-
-    def _load_img(self, img_name_list, raw_img_path, img_num_channel):
-        '''
-        load PIL images, and then convert PIL images to Tensors
-        return a list of 3D tensor of image
-        '''
-        img_list = []
-
-        for img_name in img_name_list:
-            path = raw_img_path + img_name
-            img = PIL.Image.open(path)
-            if img_num_channel == 1:
-                img = img.convert('L')
-            elif img_num_channel == 3:
-                img = img.convert('RGB')
-
-            img_list.append(img)
-
-        return img_list
-
-
-    def _load_dataset(self, dataset_path, group, name_list, mode='value'):
         with h5py.File(dataset_path, 'r') as hdf:
-            data_list = [hdf[group+'/'+name][:,:] for name in name_list]
-            # convert data into 3D tensor (Channel, H, W)
-            data_list = [torch.from_numpy(data[np.newaxis,:,:]).float() for data in data_list]
-        return data_list
+            dataset_name = hdf.attrs['dataset_name']
+            img_name_list = hdf[mode]['img_name'][:]
+            if self.mode == 'train':
+                position_list = [hdf['train']['patch_position'][name][...] for name in img_name_list]
 
-    def _preprocess(self, process_dict):
-        img_list, dmap_list, rmap_list = self.image_list, self.dmap_list, self.rmap_list
+        if self.target == 'Density_Context':
+            if self.mode == 'train':
+                self.image_list, self.image_patch = self._load_img(img_name_list, raw_img_path, img_num_channel, position_list, patch_size)
+                self.density_list, self.density_patch = self._load_dataset(dataset_path, 'train/'+args['data']['density_group'], img_name_list, position_list, patch_size, downscale)
+                self.perspective_list, self.perspective_patch = self._load_dataset("./dataset/pred_perspective.h5", 'train/pred_perspective', img_name_list, position_list, patch_size, downscale)
+                context_list = self._load_dataset(dataset_path, 'train/'+args['data']['context_group'], img_name_list)
+                self.context_map = torch.cat(context_list, 0)
+                self.sample_number = self.image_patch.shape[0]
+            elif self.mode == 'test':
+                self.image_list = self._load_img(img_name_list, raw_img_path, img_num_channel)
+                self.density_list = self._load_dataset(dataset_path, 'test/'+args['data']['density_group'], img_name_list)
+                self.perspective_list = self._load_dataset("./dataset/pred_perspective.h5", 'test/pred_perspective', img_name_list)
+                self.context_list = self._load_dataset(dataset_path, 'test/'+args['data']['context_group'], img_name_list)
+                self.sample_number = len(self.image_list)
+                padding = PaddingEX2(16)
+                result = [padding(self.image_list[i], [self.density_list[i], self.context_list[i], self.perspective_list[i]], ratio=downscale) for i in range(self.sample_number)]
+                self.image_list, self.density_list, self.context_list, self.perspective_list = zip(*result)
+        elif self.target == 'Perspective':
+                self.image_list = self._load_img(img_name_list, raw_img_path, img_num_channel)
+                self.perspective_list = self._load_dataset(dataset_path, self.mode+'/'+args['data']['perspective_group'], img_name_list)
+                self.sample_number = len(self.image_list)
+                padding = PaddingEX2(16)
+                result = [padding(self.image_list[i], [self.perspective_list[i]], ratio=downscale) for i in range(self.sample_number)]
+                self.image_list, self.perspective_list = zip(*result)
+        self.image_number = len(self.image_list)
+        print('Load dataset: {}, channel: {}, # of images: {}, # of samples: {}'.format(\
+                dataset_name, img_num_channel, self.image_number, self.sample_number))
 
+
+    def _load_img(self, img_name_list, raw_img_path, img_num_channel, position_list=None, patch_size=[256, 256]):
+        '''
+        load PIL images, and convert PIL images to patch Tensors
+        '''
+        img_list = [load_img(raw_img_path + name, img_num_channel) for name in img_name_list]
         to_tensor = ToTensor()
-        img_list = [to_tensor(img) for img in img_list]
+        normalizer = transforms.Normalize(mean=[127, 127, 127], std=[255, 255, 255])
+        img_list = [normalizer(to_tensor(img)) for img in img_list]
 
-        if "normalize" in process_dict:
-            normalizer = transforms.Normalize(mean=[127, 127, 127], std=[255, 255, 255])
-            img_list = [normalizer(img) for img in img_list]
+        if position_list is not None:
+            patch_h, patch_w = patch_size
+            img_list = [pad2d_max(img, patch_h, patch_w) for img in img_list]
+            image_patch = [get_patches(i, pos, patch_h, patch_w) for i, pos in enumerate(position_list)]
+            image_patch = np.concatenate(image_patch, axis=0)
+            # 4-D: N*C*H*W
+            return img_list, image_patch
+        else:
+            return img_list
 
-        if "GaussianNoise" in process_dict:
-            num_scale = len(process_dict["GaussianNoise"])
-            noise = RandomNoise('GaussianNoise', scale_list=process_dict["GaussianNoise"])
-            noisy_result = [noise(img) for img in img_list]
+    def _load_dataset(self, dataset_path, group, name_list, position_list=None, patch_size=[256, 256], downscale=4):
+        with h5py.File(dataset_path, 'r') as hdf:
+            data_list = [hdf[group][name][...] for name in name_list]
 
-            for i, noisy_img_list in enumerate(noisy_result):
-                img_list.extend(noisy_img_list)
-            dmap_list.extend([dmap for dmap in dmap_list for i in range(num_scale)])
-            rmap_list.extend([rmap for rmap in rmap_list for i in range(num_scale)])
+        # convert data into 3D tensor (C, H, W)
+        if len(data_list[0].shape) == 2:
+            data_list = [data[np.newaxis,:,:] for data in data_list]
+        data_list = [torch.from_numpy(data).float() for data in data_list]
 
-        if "HorizontalFlip" in process_dict:
-            flip = HorizontalFlip()
-            result = [flip(img_list[i], dmap_list[i], rmap_list[i]) for i in range(len(img_list))]
-            flip_img_list, flip_dmap_list, flip_rmap_list = zip(*result)
-            img_list.extend(flip_img_list)
-            dmap_list.extend(flip_dmap_list)
-            rmap_list.extend(flip_rmap_list)
+        if position_list is not None:
+            patch_h, patch_w = patch_size[0] / downscale, patch_size[1] / downscale
+            data_list = [pad2d_max(data, patch_h, patch_w) for data in data_list]
+            data_patch = [get_patches(i, pos/downscale, patch_h, patch_w) for i, pos in enumerate(position_list)]
+            data_patch = np.concatenate(data_patch, axis=0)
+            return data_list, data_patch
+        else:
+            return data_list
 
-        if "RandomPosCrop" in process_dict:
-            size = process_dict["RandomPosCrop"]["size"]
-            number = process_dict["RandomPosCrop"]["number"]
-            crop = RandomPosCrop(size, number)
+    def _get_train_data(self, index):
+        if self.target == 'Density_Context':
+            pos = self.image_patch[index,:]
+            image = self.image_list[pos[0]][:,pos[2]:pos[4],pos[1]:pos[3]]
+            if random.random() < 0.2:
+                image = image + image.new(image.size()).normal_(0, 0.03)
 
-            result = [crop(img_list[i], dmap_list[i], rmap_list[i]) for i in range(len(img_list))]
-            img_list, dmap_list, rmap_list = [], [], []
-            for (img, dmap, rmap) in result:
-                img_list.extend(img)
-                dmap_list.extend(dmap)
-                rmap_list.extend(rmap)
+            pos = self.density_patch[index, :]
+            density = self.density_list[pos[0]][:,pos[2]:pos[4],pos[1]:pos[3]]
 
-        if "PaddingEX2" in process_dict:
-            padding = PaddingEX2(process_dict['PaddingEX2'])
-            result = [padding(img_list[i], dmap_list[i], rmap_list[i]) for i in range(len(img_list))]
-            img_list, dmap_list, rmap_list = zip(*result)
+            pos = self.perspective_patch[index, :]
+            perspective = self.perspective_list[pos[0]][:,pos[2]:pos[4],pos[1]:pos[3]]
 
-        return img_list, dmap_list, rmap_list
+            context = self.context_map[index, :, :].unsqueeze(0)
 
+            return (index, image, density, context, perspective)
+
+        elif self.target == 'Perspective':
+            image = self.image_list[index]
+            if random.random() < 0.5:
+                image = image + image.new(image.size()).normal_(0, 0.03)
+            perspective = self.perspective_list[index]
+            return (index, image, perspective)
+
+    def _get_test_data(self, index):
+        if self.target == 'Density_Context':
+            image = self.image_list[index]
+            density = self.density_list[index]
+            context = self.context_list[index]
+            perspective = self.perspective_list[index]
+            # print image.size(), density.size(), context.size(), perspective.size()
+            return (index, image, density, context, perspective)
+        elif self.target == 'Perspective':
+            image = self.image_list[index]
+            perspective = self.perspective_list[index]
+            return (index, image, perspective)
 
     def __getitem__(self, index):
         """
@@ -122,11 +174,10 @@ class ImageFolder(data.Dataset):
         Returns:
             tuple: (image, dmap)
         """
-        img = self.image_list[index]
-        dmap = self.dmap_list[index]
-        rmap = self.rmap_list[index]
-
-        return (index, img, dmap, rmap)
+        if self.mode == 'train':
+            return self._get_train_data(index)
+        elif self.mode == 'test':
+            return self._get_test_data(index)
 
     def __len__(self):
         """
