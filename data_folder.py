@@ -49,8 +49,9 @@ class DataFolder(data.Dataset):
         assert mode in ['train', 'test']
         assert args['model']['target'] in ['Density_Context', 'Perspective']
 
-        self.target = args['model']['target']
         self.mode = mode
+        self.target = args['model']['target']
+        self.random_noise = args['data'][mode]['random_noise']
 
         dataset_path = args['data']['dataset_path']
         raw_img_path = args['data']['raw_img_path']
@@ -68,20 +69,33 @@ class DataFolder(data.Dataset):
             if self.mode == 'train':
                 self.image_list, self.image_patch = self._load_img(img_name_list, raw_img_path, img_num_channel, position_list, patch_size)
                 self.density_list, self.density_patch = self._load_dataset(dataset_path, 'train/'+args['data']['density_group'], img_name_list, position_list, patch_size, downscale)
-                self.perspective_list, self.perspective_patch = self._load_dataset("./dataset/pred_perspective.h5", 'train/pred_perspective', img_name_list, position_list, patch_size, downscale)
+                # self.perspective_list, self.perspective_patch = self._load_dataset("./dataset/pred_perspective.h5", 'train/pred_perspective', img_name_list, position_list, patch_size, downscale)
+                self.perspective_list, self.perspective_patch = self._load_dataset(dataset_path, 'train/'+args['data']['perspective_group'], img_name_list, position_list, patch_size, downscale)
                 context_list = self._load_dataset(dataset_path, 'train/'+args['data']['context_group'], img_name_list)
                 self.context_map = torch.cat(context_list, 0)
                 self.sample_number = self.image_patch.shape[0]
             elif self.mode == 'test':
                 self.image_list = self._load_img(img_name_list, raw_img_path, img_num_channel)
                 self.density_list = self._load_dataset(dataset_path, 'test/'+args['data']['density_group'], img_name_list)
-                self.perspective_list = self._load_dataset("./dataset/pred_perspective.h5", 'test/pred_perspective', img_name_list)
+                self.perspective_list = self._load_dataset(dataset_path, 'test/pred_perspective_1', img_name_list)
+                # self.perspective_list = self._load_dataset(dataset_path, 'test/'+args['data']['perspective_group'], img_name_list)
                 self.context_list = self._load_dataset(dataset_path, 'test/'+args['data']['context_group'], img_name_list)
                 self.sample_number = len(self.image_list)
                 padding = PaddingEX2(16)
                 result = [padding(self.image_list[i], [self.density_list[i], self.context_list[i], self.perspective_list[i]], ratio=downscale) for i in range(self.sample_number)]
                 self.image_list, self.density_list, self.context_list, self.perspective_list = zip(*result)
         elif self.target == 'Perspective':
+            if self.mode == 'train':
+                # self.image_list = self._load_img(img_name_list, raw_img_path, img_num_channel)
+                # self.perspective_list = self._load_dataset(dataset_path, self.mode+'/'+args['data']['perspective_group'], img_name_list)
+                # self.sample_number = len(self.image_list)
+                # padding = PaddingEX2(16)
+                # result = [padding(self.image_list[i], [self.perspective_list[i]], ratio=downscale) for i in range(self.sample_number)]
+                # self.image_list, self.perspective_list = zip(*result)
+                self.image_list, self.image_patch = self._load_img(img_name_list, raw_img_path, img_num_channel, position_list, patch_size)
+                self.perspective_list, self.perspective_patch = self._load_dataset(dataset_path, self.mode+'/'+args['data']['perspective_group'], img_name_list, position_list, patch_size, downscale)
+                self.sample_number = self.image_patch.shape[0]
+            elif self.mode == 'test':
                 self.image_list = self._load_img(img_name_list, raw_img_path, img_num_channel)
                 self.perspective_list = self._load_dataset(dataset_path, self.mode+'/'+args['data']['perspective_group'], img_name_list)
                 self.sample_number = len(self.image_list)
@@ -93,6 +107,13 @@ class DataFolder(data.Dataset):
                 dataset_name, img_num_channel, self.image_number, self.sample_number))
 
 
+    def _get_patch_positions(self, data_list, position_list, patch_size, downscale):
+        patch_h, patch_w = patch_size[0] / downscale, patch_size[1] / downscale
+        data_list = [pad2d_max(data, patch_h, patch_w) for data in data_list]
+        data_patch = [get_patches(i, pos/downscale, patch_h, patch_w) for i, pos in enumerate(position_list)]
+        data_patch = np.concatenate(data_patch, axis=0)
+        return data_list, data_patch
+
     def _load_img(self, img_name_list, raw_img_path, img_num_channel, position_list=None, patch_size=[256, 256]):
         '''
         load PIL images, and convert PIL images to patch Tensors
@@ -103,14 +124,11 @@ class DataFolder(data.Dataset):
         img_list = [normalizer(to_tensor(img)) for img in img_list]
 
         if position_list is not None:
-            patch_h, patch_w = patch_size
-            img_list = [pad2d_max(img, patch_h, patch_w) for img in img_list]
-            image_patch = [get_patches(i, pos, patch_h, patch_w) for i, pos in enumerate(position_list)]
-            image_patch = np.concatenate(image_patch, axis=0)
-            # 4-D: N*C*H*W
-            return img_list, image_patch
+            img_list, img_patch = self._get_patch_positions(img_list, position_list, patch_size, 1)
+            return img_list, img_patch
         else:
             return img_list
+
 
     def _load_dataset(self, dataset_path, group, name_list, position_list=None, patch_size=[256, 256], downscale=4):
         with h5py.File(dataset_path, 'r') as hdf:
@@ -122,10 +140,7 @@ class DataFolder(data.Dataset):
         data_list = [torch.from_numpy(data).float() for data in data_list]
 
         if position_list is not None:
-            patch_h, patch_w = patch_size[0] / downscale, patch_size[1] / downscale
-            data_list = [pad2d_max(data, patch_h, patch_w) for data in data_list]
-            data_patch = [get_patches(i, pos/downscale, patch_h, patch_w) for i, pos in enumerate(position_list)]
-            data_patch = np.concatenate(data_patch, axis=0)
+            data_list, data_patch = self._get_patch_positions(data_list, position_list, patch_size, downscale)
             return data_list, data_patch
         else:
             return data_list
@@ -134,24 +149,24 @@ class DataFolder(data.Dataset):
         if self.target == 'Density_Context':
             pos = self.image_patch[index,:]
             image = self.image_list[pos[0]][:,pos[2]:pos[4],pos[1]:pos[3]]
-            if random.random() < 0.2:
+            if random.random() < 0.5:
                 image = image + image.new(image.size()).normal_(0, 0.03)
-
             pos = self.density_patch[index, :]
             density = self.density_list[pos[0]][:,pos[2]:pos[4],pos[1]:pos[3]]
-
             pos = self.perspective_patch[index, :]
             perspective = self.perspective_list[pos[0]][:,pos[2]:pos[4],pos[1]:pos[3]]
-
             context = self.context_map[index, :, :].unsqueeze(0)
-
             return (index, image, density, context, perspective)
 
         elif self.target == 'Perspective':
-            image = self.image_list[index]
+            pos = self.image_patch[index,:]
+            image = self.image_list[pos[0]][:,pos[2]:pos[4],pos[1]:pos[3]]
             if random.random() < 0.5:
                 image = image + image.new(image.size()).normal_(0, 0.03)
-            perspective = self.perspective_list[index]
+            pos = self.perspective_patch[index, :]
+            perspective = self.perspective_list[pos[0]][:,pos[2]:pos[4],pos[1]:pos[3]]
+            # image = self.image_list[index]
+            # perspective = self.perspective_list[index]
             return (index, image, perspective)
 
     def _get_test_data(self, index):
