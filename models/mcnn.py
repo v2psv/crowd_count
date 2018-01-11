@@ -28,31 +28,30 @@ class MCNN(nn.Module):
 
 
     def _make_column(self, in_channels, out_channels, ksize, stride):
-    	column = nn.Sequential(
-	    	nn.Conv2d(in_channels[0], out_channels[0], kernel_size=ksize[0],
-	    			stride=stride[0], padding=int(ksize[0]/2), bias=True),
-	    	nn.ReLU(inplace=True),
-	        nn.MaxPool2d(kernel_size=2, stride=2),
-	        nn.Conv2d(in_channels[1], out_channels[1], kernel_size=ksize[1],
-	    			stride=stride[1], padding=int(ksize[1]/2), bias=True),
-	    	nn.ReLU(inplace=True),
-	        nn.MaxPool2d(kernel_size=2, stride=2),
-	        nn.Conv2d(in_channels[2], out_channels[2], kernel_size=ksize[2],
-	    			stride=stride[2], padding=int(ksize[2]/2), bias=True),
-	    	nn.ReLU(inplace=True),
-	    	nn.Conv2d(in_channels[3], out_channels[3], kernel_size=ksize[3],
-	    			stride=stride[3], padding=int(ksize[3]/2), bias=True),
-	    	nn.ReLU(inplace=True),
+        column = nn.Sequential(
+        	nn.Conv2d(in_channels[0], out_channels[0], kernel_size=ksize[0],
+        			stride=stride[0], padding=int(ksize[0]/2), bias=True),
+        	nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels[1], out_channels[1], kernel_size=ksize[1],
+        			stride=stride[1], padding=int(ksize[1]/2), bias=True),
+        	nn.ReLU(inplace=True),
+            nn.MaxPool2d(kernel_size=2, stride=2),
+            nn.Conv2d(in_channels[2], out_channels[2], kernel_size=ksize[2],
+        			stride=stride[2], padding=int(ksize[2]/2), bias=True),
+        	nn.ReLU(inplace=True),
+        	nn.Conv2d(in_channels[3], out_channels[3], kernel_size=ksize[3],
+        			stride=stride[3], padding=int(ksize[3]/2), bias=True),
+        	nn.ReLU(inplace=True),
         )
-
         return column
 
 
     def forward(self, x, pmap=None):
-    	a = self.column1(x)
-    	b = self.column2(x)
-    	c = self.column3(x)
-    	d = torch.cat((a, b, c), 1)
-    	d = self.conv_x(d)
+        a = self.column1(x)
+        b = self.column2(x)
+        c = self.column3(x)
+        d = torch.cat((a, b, c), 1)
+        d = self.conv_x(d)
 
         return d

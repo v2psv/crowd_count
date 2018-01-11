@@ -1,0 +1,38 @@
+{
+    "data":{
+      "dataset":"Tech_A",
+      "dataset_path":"/home/zhouqi/crowd_count/dataset/shanghaitech/shanghaitech_part_A_final_4.h5",
+      "raw_img_path":"/home/zhouqi/crowd_count/dataset/shanghaitech/train_test_images/",
+      "density_group":"density_downscale_4_beta_0.35",
+      "context_group":"context_downscale_4_window_64",
+      "perspect_group":"perspective_downscale_4",
+      "downscale":4,
+      "img_num_channel":3,
+      "train":{
+          "patch_size":[128, 256],
+          "num_patch":100,
+          "num_workers":10,
+          "batch_size":180,
+          "pin_memory":false,
+          "random_noise":true
+      },
+      "test":{
+          "num_workers":20,
+          "batch_size":1,
+          "pin_memory":false,
+          "random_noise":false
+      }
+    },
+  "model":{
+    "target":"ContextPyramid",
+    "arch":"Pyramid_Context",
+    "use_bn":true,
+    "activation":"LeakyReLU",
+    "optimizer":"RMSprop",
+    "epochs":1000,
+    "test_freq":1,
+    "learning_rate":1e-4,
+    "weight_decay":1e-6,
+    "resume":false
+  }
+}

@@ -70,49 +70,31 @@ class Decoder(nn.Module):
         return x
 
 
-class Perspective(nn.Module):
-    def __init__(self, in_dim=3, use_bn=True, activation="ReLU"):
-        super(Perspective, self).__init__()
-        """
-        model = models.resnet50(pretrained=True)
-        for param in model.parameters():
-            param.requires_grad = False
-        self.feature1 = nn.Sequential(
-            model.conv1,
-            model.bn1,
-            model.relu,
-            model.maxpool,
-            model.layer1,
-            model.layer2,
-            model.layer3,
-            model.layer4
-        )
-        """
-
-        """
-        pretrained_model = models.vgg16(pretrained=True)
-        for param in pretrained_model.parameters():
-            param.requires_grad = False
-        self.encoder = pretrained_model.features
-        self.encoder_fc = nn.Linear(8*8*512, 10)
-        self.decoder_fc = nn.Linear(10, 8*8*128)
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(128, 64, 2, stride=2, padding=0),
-            nn.ReLU(inplace=False),
-            nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1),
-            nn.ReLU(inplace=False),
-            nn.ConvTranspose2d(32, 1, 4, stride=2, padding=1),
-        )
-        self.init_weight(self.decoder.modules())
-        """
+class MultiTask(nn.Module):
+    def __init__(self, in_dim, use_bn=True, activation="ReLU"):
+        super(MultiTask, self).__init__()
 
         self.encoder = Encoder(in_dim, use_bn=use_bn, activation=activation)
-        self.decoder = Decoder(out_chan=64, use_bn=use_bn, activation=activation)
+        self.density_decoder = Decoder(out_chan=64, use_bn=use_bn, activation=activation)
+        self.context_decoder = Decoder(out_chan=64, use_bn=use_bn, activation=activation)
+        self.perspect_decoder = Decoder(out_chan=64, use_bn=use_bn, activation=activation)
+
+        self.context  = nn.Sequential(
+            ConvBlock(64, 64, ksize=3, stride=1, pad=1, use_bn=False, activation=activation),
+            ConvBlock(64, 5, ksize=1, stride=1, pad=0, use_bn=False, activation=activation)
+            )
 
         self.perspect = nn.Sequential(
             ConvBlock(64, 64, ksize=3, stride=1, pad=1, use_bn=False, activation=activation),
             ConvBlock(64, 1, ksize=1, stride=1, pad=0, use_bn=False, activation=activation)
             )
+
+        self.density = nn.Sequential(
+            ConvBlock(64+5+64, 64, ksize=5, stride=1, pad=2, use_bn=False, activation=activation),
+            ConvBlock(64, 64, ksize=3, stride=1, pad=1, use_bn=False, activation=activation),
+            ConvBlock(64, 1, ksize=1, stride=1, pad=0, use_bn=False, activation=activation)
+            )
+
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 torch.nn.init.kaiming_normal(m.weight.data, mode='fan_in')
@@ -122,27 +104,15 @@ class Perspective(nn.Module):
                 m.bias.data.zero_()
 
 
-    def init_weight(self, modules):
-        for m in modules:
-            if isinstance(m, nn.Conv2d):
-                torch.nn.init.kaiming_normal(m.weight.data, mode='fan_in')
-                m.bias.data.zero_()
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-
     def forward(self, img):
-        """
-        feature = self.encoder(img)
-        # feature = self.spatial_pyramid_pooling(feature, (8, 8))
-        feature = feature.view(feature.size(0), -1)
-        embed = self.encoder_fc(feature)
-        feature = self.decoder_fc(embed)
-        feature = feature.view(feature.size(0), 128, 8, 8)
-        out = self.decoder(feature)
-        """
         f1, f2, f3 = self.encoder(img)
-        f_p = self.decoder(f1, f2, f3)
-        out = self.perspect(f_p)
+        f_c = self.context_decoder(f1, f2, f3)
+        f_p = self.perspect_decoder(f1, f2, f3)
+        f_d = self.density_decoder(f1, f2, f3)
 
-        return out, f_p
+        context = self.context(f_c)
+        perspect = self.perspect(f_p)
+
+        density = self.density(torch.cat([context, f_p, f_d], 1))
+
+        return density, context, perspect

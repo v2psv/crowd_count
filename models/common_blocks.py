@@ -107,5 +107,31 @@ class UpBlock(nn.Module):
         a = self.interp(x)
         a = self.pool(self.conv(a))
 
-
         return a
+
+
+class FeaturePyramid(nn.Module):
+    def __init__(self, in_dim=64, use_bn=True, activation="ReLU"):
+        super(FeaturePyramid, self).__init__()
+
+        self.block1 = nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2),
+                        BasicBlock(in_chan=[64, 64, 64], out_chan=[64, 64, 64], ksize=[3, 3, 3], stride=[1, 1, 1], use_bn=use_bn, activation=activation),
+                        )
+        self.block2 = nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2),
+                        BasicBlock(in_chan=[64, 64, 64], out_chan=[64, 64, 64], ksize=[3, 3, 3], stride=[1, 1, 1], use_bn=use_bn, activation=activation),
+                        )
+        self.block3 = nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2),
+                        BasicBlock(in_chan=[64, 64, 64], out_chan=[64, 64, 64], ksize=[3, 3, 3], stride=[1, 1, 1], use_bn=use_bn, activation=activation),
+                        nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2)
+                        )
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+
+    def forward(self, feature):
+        x = self.block1(feature)
+        y = self.block2(x)
+        z = self.block3(y)
+        x = self.pool(x)
+
+        x = torch.cat([x, y, z], 1)
+
+        return x

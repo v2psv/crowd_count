@@ -1,30 +1,28 @@
 {
   "data":{
     "dataset":"shanghaitech_part_A",
-    "dataset_path":"/home/zhouqi/crowd_count/dataset/shanghaitech_part_A_final.h5",
+    "dataset_path":"/home/zhouqi/crowd_count/dataset/shanghaitech_part_A_final_2.h5",
     "raw_img_path":"/home/zhouqi/crowd_count/dataset/raw_data/ShanghaiTech/part_A_final/train_test_images/",
-    "dmap_group":"density_downscale_4_beta_0.5",
-    "train_batch_size":32,
-    "img_num_channel":3,
-    "train_img_process":
-    {
-        "normalize":true,
-        "RandomPosCrop":{"size":[256, 256], "number":20}
-    },
-    "test_img_process":
-    {
-        "normalize":true
-    }
+    "density_group":"density_downscale_4_beta_0.35",
+    "context_group":"context_downscale_4_window_64",
+    "perspective_group":"perspective_downscale_4",
+    "patch_size":[256, 256],
+    "downscale":4,
+    "train_batch_size":8,
+    "img_num_channel":3
   },
   "model":{
-    "arch":"NET11",
-    "optimizer":"Adam",
+    "target":"Perspective",
+    "arch":"Perspective",
+    "use_bn":false,
+    "activation":"ReLU",
+    "optimizer":"RMSprop",
     "epochs":1e5,
     "use_roi":false,
-    "test_freq":10,
-    "learning_rate":1e-3,
+    "test_freq":2,
+    "learning_rate":1e-6,
     "momentum":0.9,
-    "weight_decay":1e-6,
+    "weight_decay":0,
     "resume":false
   }
 }

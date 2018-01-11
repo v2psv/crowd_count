@@ -192,7 +192,7 @@ class RandomPosCrop(object):
 
         return img_list, dmap_list, rmap_list
 
-
+'''
 class PaddingEX2(object):
     def __init__(self, pad_ex=4):
         self.pad_ex = pad_ex
@@ -217,6 +217,28 @@ class PaddingEX2(object):
             label_list = [pad_2d(label, (0, w/ratio-label.size(2), 0, h/ratio-label.size(1))) for label in label_list]
 
         return [img] + label_list
+'''
+
+class PaddingEX2(object):
+    def __init__(self, pad_ex):
+        self.pad_ex = pad_ex
+
+    def __call__(self, img):
+        """
+        Args:
+            img (Tensor, CHW): Image to be padded.
+        Returns:
+            Tensor: padded image.
+        """
+        c, h, w = img.size()
+        p_h = (self.pad_ex - h % self.pad_ex) % self.pad_ex
+        p_w = (self.pad_ex - w % self.pad_ex) % self.pad_ex
+
+        if p_h == 0 and p_w == 0:
+            return img
+
+        img = pad_2d(img, (0, p_w, 0, p_h))
+        return img
 
 
 class RandomNoise(object):
