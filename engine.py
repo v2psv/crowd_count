@@ -8,8 +8,8 @@ import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import utility, models
-from data_folder import DataFolder
-from loss import MSELoss, FocalLoss2d, L1Loss, OrderLoss, CrossEntropyLoss2d, RelativeLoss
+from data_folder_shanghaitech import DataFolder
+from loss import MSELoss, FocalLoss2d, L1Loss, OrderLoss, CrossEntropyLoss2d, L2_Grad_Loss, GradientLoss
 
 
 class Engine(object):
@@ -33,43 +33,15 @@ class Engine(object):
 			# self.pretrained_model.load_state_dict(torch.load(checkpoint_path)['state_dict'])
 			# for param in self.pretrained_model.parameters():
 			# 	param.requires_grad = False
-		elif self.target == 'Context':
-			self.criterion = FocalLoss2d(gamma=0, weight=[1,3,10,100,1000]).cuda()
-			self.recorder_list = ['time', 'context_loss']
-			self.train_loss = pd.DataFrame(columns=['context_loss'])
-			self.test_loss  = pd.DataFrame(columns=['context_loss'])
 		elif self.target == 'ContextPyramid':
 			self.density_criterion = MSELoss().cuda()
-			# self.context1_criterion = FocalLoss2d(gamma=0, weight=[1,2,15,60,400]).cuda()
-			# self.context2_criterion = FocalLoss2d(gamma=0, weight=[1,2,10,30,200]).cuda()
-			self.context1_criterion = MSELoss().cuda()
-			self.context2_criterion = MSELoss().cuda()
-			self.recorder_list = ['time', 'density_loss', 'context1_loss', 'context2_loss', 'error_mae', 'error_mse']
-			self.train_loss = pd.DataFrame(columns=['density_loss', 'context1_loss', 'context2_loss', 'error_mae', 'error_mse'])
-			self.test_loss  = pd.DataFrame(columns=['density_loss', 'context1_loss', 'context2_loss', 'error_mae', 'error_mse'])
-		elif self.target == 'Perspect':
-			# train_order_num = self.train_folder.get_order_num()
-			# test_order_num  = self.test_folder.get_order_num()
-			# self.criterion = OrderLoss(num=train_order_num+test_order_num).cuda()
-			# self.criterion = FocalLoss2d(gamma=1, weight=[1, 1, 1, 1.7, 25]).cuda()
-			self.criterion = L1Loss().cuda()
-			self.recorder_list = ['time', 'perspect_loss']
-			self.train_loss = pd.DataFrame(columns=['perspect_loss'])
-			self.test_loss  = pd.DataFrame(columns=['perspect_loss'])
-		elif self.target == 'Scene':
-			self.context_criterion = FocalLoss2d(gamma=2, weight=[1,3,10,100,1000]).cuda()
-			# self.perspect_criterion = FocalLoss2d(gamma=2, weight=[1, 1, 1, 1.7, 25]).cuda()
-			self.perspect_criterion = L1Loss().cuda()
-			self.recorder_list = ['time', 'context_loss', 'perspect_loss']
-			self.train_loss = pd.DataFrame(columns=['context_loss', 'perspect_loss'])
-			self.test_loss  = pd.DataFrame(columns=['context_loss', 'perspect_loss'])
-		elif self.target == 'MultiTask':
-			self.density_criterion = MSELoss().cuda()
-			self.context_criterion = FocalLoss2d(gamma=2, weight=[1,3,10,100,1000]).cuda()
-			# self.context_criterion = RelativeLoss().cuda()
-			self.recorder_list = ['time', 'density_loss', 'context_loss', 'error_mae', 'error_mse']
-			self.train_loss = pd.DataFrame(columns=['density_loss', 'context_loss', 'error_mae', 'error_mse'])
-			self.test_loss  = pd.DataFrame(columns=['density_loss', 'context_loss', 'error_mae', 'error_mse'])
+			self.grad_loss = GradientLoss(alpha=1).cuda()
+			self.context_criterion = FocalLoss2d(gamma=0, weight=args['model']['context_weight']).cuda()  # shanghaitech_A
+			# self.context_criterion = FocalLoss2d(gamma=0, weight=args['model']['context_weight']).cuda() # mall
+			# self.context_criterion = FocalLoss2d(gamma=0, weight=args['model']['context_weight']).cuda()    # expo2010
+			self.recorder_list = ['time', 'density_loss', 'grad_loss', 'context_loss', 'error_mae', 'error_mse']
+			self.train_loss = pd.DataFrame(columns=['density_loss', 'grad_loss', 'context_loss', 'error_mae', 'error_mse'])
+			self.test_loss  = pd.DataFrame(columns=['density_loss', 'grad_loss', 'context_loss', 'error_mae', 'error_mse'])
 
 		self.epoch, self.best_record, self.train_loss, self.test_loss = self.load_checkpoint(args['model']['resume'])
 
@@ -90,7 +62,9 @@ class Engine(object):
 		with utility.Timer() as t:
 			model = models.__dict__[args['model']['arch']](in_dim=args['data']['img_num_channel'],
 														   use_bn=args["model"]["use_bn"],
-														   activation=args["model"]["activation"])
+														   activation=args["model"]["activation"],
+														   n_class=args['model']['context_levels'],
+														   use_pmap=args['data']['use_pmap'])
 			model.apply(weights_init)
 
 			if args['model']['optimizer'] in ['Adagrad', 'Adadelta', 'Adam', 'RMSprop']:
@@ -187,7 +161,7 @@ class Engine(object):
 		utility.save_result(self.checkpoint_dir, result_dict=result_dict, mode='newest', num=10)
 
 		if self.target in ['Density', 'MultiTask', 'ContextPyramid']:
-			current_record = recorder['error_mse'].avg
+			current_record = recorder['error_mae'].avg
 		elif self.target == 'Context':
 		 	current_record = recorder['context_loss'].avg
 		elif self.target == 'Perspect':
@@ -293,34 +267,31 @@ class Engine(object):
 		num_iter = len(self.train_loader)
 
 		x = 0
-		for i, (idx, img, density, context1, context2) in enumerate(self.train_loader):
+		for i, (idx, img, density, context) in enumerate(self.train_loader):
 			print(f"Training... {i/num_iter*100:.1f} %\r",end="")
 
 			input_var = torch.autograd.Variable(img.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
 			density_var = torch.autograd.Variable(density.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
-			context1_var = torch.autograd.Variable(context1.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
-			context2_var = torch.autograd.Variable(context2.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
+			context_var = torch.autograd.Variable(context.cuda(), requires_grad=False).type(torch.cuda.LongTensor)
+			# pmap_var = torch.autograd.Variable(pmap.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
 
-			pred_density, pred_context1, pred_context2 = self.model(input_var)
+			pred_density, pred_context = self.model(input_var)
+			pred_density = pred_density.clamp(min=-10, max=10)
+
 			density_loss = self.density_criterion(pred_density, density_var)
-			context1_loss = self.context1_criterion(pred_context1, context1_var)
-			context2_loss = self.context2_criterion(pred_context2, context2_var)
+			grad_loss = self.grad_loss(pred_density, density_var)
+			context_loss = self.context_criterion(pred_context, context_var)
 
-			if x%3 == 0:
-				loss = density_loss
-			elif x%3 == 1:
-				loss = context1_loss
-			else:
-				loss = context2_loss
-			# loss = density_loss + 10*context1_loss + 10*context2_loss
+			loss = density_loss + 0.1*grad_loss + context_loss
 
 			self.optimizer.zero_grad()
 			loss.backward()
+			torch.nn.utils.clip_grad_norm(self.model.parameters(), 1)
 			self.optimizer.step()
 
-			self.update_recorder(recorder, density_loss=density_loss,
+			self.update_recorder(recorder, density_loss=density_loss, grad_loss=grad_loss,
 								pred_density=pred_density, target_density=density_var,
-								context1_loss=context1_loss, context2_loss=context2_loss)
+								context_loss=context_loss)
 
 		self.update_loss(recorder, 'train')
 		utility.print_info(recorder, epoch=self.epoch, preffix='Train ')
@@ -331,98 +302,29 @@ class Engine(object):
 		self.current_time = time.time()
 		num_iter = len(self.test_loader)
 
-		result_density, result_context1, result_context2 = [None] * num_iter, [None] * num_iter, [None] * num_iter
-
-		for i, (idx, img, density, context1, context2) in enumerate(self.test_loader):
-			idx = idx.numpy()[0]
-			if i % 10 == 0:
-				print(f"Validating... {i/num_iter*100:.1f} %\r",end="")
-
-			input_var = torch.autograd.Variable(img.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
-			density_var = torch.autograd.Variable(density.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
-			context1_var = torch.autograd.Variable(context1.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
-			context2_var = torch.autograd.Variable(context2.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
-
-			pred_density, pred_context1, pred_context2 = self.model(input_var)
-			# print(density_var.size(), context1_var.size(), context2_var.size())
-			# print(pred_density.size(), pred_context1.size(), pred_context2.size())
-			density_loss = self.density_criterion(pred_density, density_var)
-			context1_loss = self.context1_criterion(pred_context1, context1_var)
-			context2_loss = self.context2_criterion(pred_context2, context2_var)
-
-			result_density[idx] = pred_density.data.cpu().numpy()[0,:,:,:]
-			result_context1[idx] = pred_context1.data.cpu().numpy()[0,:,:,:]
-			result_context2[idx] = pred_context2.data.cpu().numpy()[0,:,:,:]
-			self.update_recorder(recorder, density_loss=density_loss,
-								pred_density=pred_density, target_density=density_var,
-								context1_loss=context1_loss, context2_loss=context2_loss)
-
-		self.update_loss(recorder, 'test')
-		utility.print_info(recorder, preffix='*** Validation *** ')
-		self.save_checkpoint(result_dict={"density":result_density, "context1":result_context1, "context2":result_context2}, recorder=recorder)
-
-	def train_multi_epoch(self):
-		self.model.train()
-		self.epoch += 1
-		recorder = self.init_recorder(self.recorder_list)
-		self.current_time = time.time()
-		num_iter = len(self.train_loader)
-
-		x = 0
-		for i, (idx, img, density, context) in enumerate(self.train_loader):
-			if i % 2 == 0:
-				print(f"Training... {i/num_iter*100:.1f} %\r",end="")
-
-			input_var = torch.autograd.Variable(img.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
-			density_var = torch.autograd.Variable(density.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
-			context_var = torch.autograd.Variable(context.cuda(), requires_grad=False).type(torch.cuda.LongTensor)
-
-			pred_density, pred_context = self.model(input_var)
-			density_loss = self.density_criterion(pred_density, density_var)
-			context_loss = self.context_criterion(pred_context, context_var)
-
-			# if x % 2 == 0:
-			# 	loss = density_loss
-			# else:
-			# 	loss = context_loss
-			loss = 100*density_loss + context_loss
-
-			self.optimizer.zero_grad()
-			loss.backward()
-			self.optimizer.step()
-
-			self.update_recorder(recorder, density_loss=density_loss, context_loss=context_loss,
-								pred_density=pred_density, target_density=density_var)
-
-		self.update_loss(recorder, 'train')
-		utility.print_info(recorder, epoch=self.epoch, preffix='Train ')
-
-	def validate_multi_epoch(self):
-		self.model.eval()
-		recorder = self.init_recorder(self.recorder_list)
-		self.current_time = time.time()
-		num_iter = len(self.test_loader)
-
-		result_density, result_context = [None] * num_iter, [None] * num_iter
+		result_density, result_context = [], []
 
 		for i, (idx, img, density, context) in enumerate(self.test_loader):
-			idx = idx.numpy()[0]
-			if i % 10 == 0:
-				print(f"Validating... {i/num_iter*100:.1f} %\r",end="")
+			print(f"Validating... {i/num_iter*100:.1f} %\r",end="")
 
 			input_var = torch.autograd.Variable(img.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
 			density_var = torch.autograd.Variable(density.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
 			context_var = torch.autograd.Variable(context.cuda(), requires_grad=False).type(torch.cuda.LongTensor)
+			# pmap_var = torch.autograd.Variable(pmap.cuda(), requires_grad=False).type(torch.cuda.FloatTensor)
 
 			pred_density, pred_context = self.model(input_var)
+			# pred_density = torch.autograd.Variable(roi.cuda(), requires_grad=False).type(torch.cuda.FloatTensor) * pred_density
 			density_loss = self.density_criterion(pred_density, density_var)
+			grad_loss = self.grad_loss(pred_density, density_var)
 			context_loss = self.context_criterion(pred_context, context_var)
 
-			result_density[idx] = pred_density.data.cpu().numpy()[0,:,:,:]
-			result_context[idx] = pred_context.data.cpu().numpy()[0,:,:,:]
+			for i in range(idx.size(0)):
+				result_density.append(pred_density.data.cpu().numpy()[i,:,:,:])
+				result_context.append(pred_context.data.cpu().numpy()[i,:,:,:])
 
-			self.update_recorder(recorder, density_loss=density_loss, context_loss=context_loss,
-								pred_density=pred_density, target_density=density_var)
+			self.update_recorder(recorder, density_loss=density_loss, grad_loss=grad_loss,
+								pred_density=pred_density, target_density=density_var,
+								context_loss=context_loss)
 
 		self.update_loss(recorder, 'test')
 		utility.print_info(recorder, preffix='*** Validation *** ')

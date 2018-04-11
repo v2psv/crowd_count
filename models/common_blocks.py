@@ -17,7 +17,7 @@ class ConvBlock(nn.Module):
         if activation == 'ReLU':
             layers.append(nn.ReLU(inplace=False))
         elif activation == 'LeakyReLU':
-            layers.append(nn.LeakyReLU(negative_slope=0.1, inplace=False))
+            layers.append(nn.LeakyReLU(negative_slope=0.01, inplace=False))
         elif activation == 'SELU':
             layers.append(nn.SELU(inplace=False))
 
@@ -111,18 +111,18 @@ class UpBlock(nn.Module):
 
 
 class FeaturePyramid(nn.Module):
-    def __init__(self, in_dim=64, use_bn=True, activation="ReLU"):
+    def __init__(self, in_dim=32, use_bn=True, activation="ReLU"):
         super(FeaturePyramid, self).__init__()
 
         self.block1 = nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2),
-                        BasicBlock(in_chan=[64, 64, 64], out_chan=[64, 64, 64], ksize=[3, 3, 3], stride=[1, 1, 1], use_bn=use_bn, activation=activation),
+                        BasicBlock(in_chan=[in_dim, 32, 32], out_chan=[32, 32, 32], ksize=[3, 3, 3], stride=[1, 1, 1], use_bn=use_bn, activation=activation),
                         )
         self.block2 = nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2),
-                        BasicBlock(in_chan=[64, 64, 64], out_chan=[64, 64, 64], ksize=[3, 3, 3], stride=[1, 1, 1], use_bn=use_bn, activation=activation),
+                        BasicBlock(in_chan=[32, 64, 64], out_chan=[64, 64, 64], ksize=[3, 3, 3], stride=[1, 1, 1], use_bn=use_bn, activation=activation),
                         )
         self.block3 = nn.Sequential(nn.MaxPool2d(kernel_size=2, stride=2),
-                        BasicBlock(in_chan=[64, 64, 64], out_chan=[64, 64, 64], ksize=[3, 3, 3], stride=[1, 1, 1], use_bn=use_bn, activation=activation),
-                        nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2)
+                        BasicBlock(in_chan=[64, 128, 128], out_chan=[128, 128, 128], ksize=[3, 3, 3], stride=[1, 1, 1], use_bn=use_bn, activation=activation),
+                        nn.ConvTranspose2d(128, 128, kernel_size=2, stride=2)
                         )
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 

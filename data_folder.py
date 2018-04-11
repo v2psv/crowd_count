@@ -10,16 +10,8 @@ import torch.utils.data as data
 from torchvision import transforms
 from scipy.misc import imresize
 from scipy.signal import convolve2d
+from scipy.stats import itemfreq
 from transform_augment import ToTensor, PaddingEX2, pad_2d
-
-def load_img(path, img_num_channel=None):
-    if img_num_channel == 1:
-        return PIL.Image.open(path).convert('L').convert('RGB')
-    elif img_num_channel == 3:
-        return PIL.Image.open(path).convert('RGB')
-    else:
-        img = PIL.Image.open(path)
-        return img.convert('RGB'), img.convert('L').convert('RGB')
 
 def pad2d_max(tensor, height, width):
     '''
@@ -48,24 +40,6 @@ def pad2d_max(tensor, height, width):
         p_tensor = torch.zeros(h+pad_h, w+pad_w)
         p_tensor[0:h, 0:w] = tensor[:,:]
         return p_tensor.float()
-
-def get_patch_positions(position_list, patch_size, downscale):
-    '''
-    get positions of patches
-    return: N*5 array: image_id, left, top, right, bottom
-    '''
-    def expand(idx, pos, patch_h, patch_w):
-        patches = np.zeros((pos.shape[0], 5))
-        patches[:, 0] = idx
-        patches[:, 1:3] = pos[:, :]
-        patches[:, 3] = pos[:, 0] + patch_w
-        patches[:, 4] = pos[:, 1] + patch_h
-        return patches.astype(int)
-
-    patch_h, patch_w = patch_size[0] / downscale, patch_size[1] / downscale
-    data_patch = [expand(i, pos/downscale, patch_h, patch_w) for i, pos in enumerate(position_list)]
-    data_patch = np.concatenate(data_patch, axis=0)
-    return data_patch
 
 def get_patch(idx, img_size, patch_size, num_patch, mode='random', downscale=4):
     assert mode in ['random', 'evenly']
@@ -101,68 +75,50 @@ def get_patch(idx, img_size, patch_size, num_patch, mode='random', downscale=4):
     label_patch[:, 1:] = label_patch[:, 1:] / downscale
     return image_patch.astype(int), label_patch.astype(int)
 
-def get_patch_context(density_list, patch_pos, wind_size, levels=None, bs=3000):
-    _, l, t, r, b = patch_pos[0, :]
-    patch_h, patch_w = int(b-t), int(r-l)
+def get_context(density_list, wind_size, bs=100, levels=None, patch_pos=None):
+    num_img = len(density_list)
     wind_h = wind_w = int(wind_size)
 
     def context_convolve(data):
-        # kernel = torch.autograd.Variable(torch.ones(1, 1, wind_h, wind_w)).type(torch.FloatTensor)
+        kernel = torch.autograd.Variable(torch.ones(1, 1, wind_h, wind_w)).type(torch.FloatTensor)
         data = torch.autograd.Variable(torch.from_numpy(data)).type(torch.FloatTensor)
-        # data = F.conv2d(data, kernel, bias=None, stride=1, padding=(int(wind_h/2), int(wind_w/2)), dilation=1, groups=1)
-        data = F.avg_pool2d(data, (wind_h, wind_w), stride=1, padding=(int(wind_h//2), int(wind_w//2)), ceil_mode=True)
+        data = F.conv2d(data, kernel, bias=None, stride=1, padding=(int(wind_h/2), int(wind_w/2)), dilation=1, groups=1)
+        # data = F.avg_pool2d(data, (wind_h, wind_w), stride=1, padding=(int(wind_h//2), int(wind_w//2)), ceil_mode=True)
         data = data.data.numpy()[:,:,:-1,:-1]
         return data
 
-    context = np.zeros((patch_pos.shape[0], 1, patch_h, patch_w))
-    for i in range(patch_pos.shape[0]):
-        idx, l, t, r, b = patch_pos[i, :]
-        context[i, 0, :, :] = density_list[idx][0, t:b, l:r]
+    if patch_pos is None:
+        img_size = np.array([(density.size(1), density.size(2)) for density in density_list]).astype(int)
+        max_h, max_w = np.max(img_size, axis=0)
+        context = np.zeros((num_img, 1, max_h, max_w))
+        for i, loc in enumerate(density_list):
+            height, width = img_size[i,:]
+            context[i, 0, :height, :width] = density_list[i][0,:,:]
+    else:
+        _, l, t, r, b = patch_pos[0, :]
+        patch_h, patch_w = int(b-t), int(r-l)
+        context = np.zeros((patch_pos.shape[0], 1, patch_h, patch_w))
+        for i in range(patch_pos.shape[0]):
+            idx, l, t, r, b = patch_pos[i, :]
+            context[i, 0, :, :] = density_list[idx][0, t:b, l:r]
 
-    n = int(np.ceil(patch_pos.shape[0]/bs))
+    n = int(np.ceil(context.shape[0]/bs))
     for i in range(n):
         print(f"Calculating Context... {i/n*100:.1f} % ({i} of {n})\r",end="")
         start_idx, end_idx = i*bs, (i+1)*bs
         context[start_idx:end_idx, :, :, :] = context_convolve(context[start_idx:end_idx, :, :, :])
     print(" "*100+"\r", end="")
-    if levels is not None:
-        context[context<levels[0]] = 0
-        context[(context>=levels[0]) & (context<levels[1])] = 1
-        context[(context>=levels[1]) & (context<levels[2])] = 2
-        context[(context>=levels[2]) & (context<levels[3])] = 3
-        context[context>=levels[3]] = 4
-        print(f"patch size: {patch_h}*{patch_w}, window size: {wind_h}*{wind_w}", np.histogram(context, bins=[0,1,2,3,4,5])[0])
-
-    return torch.from_numpy(context[:,:,:,:])
-
-
-def get_context_list(density_list, wind_size, levels=None):
-    n = len(density_list)
-    wind_h = wind_w = int(wind_size)
-    img_size = np.array([(density.size(1), density.size(2)) for density in density_list]).astype(int)
-    max_h, max_w = np.max(img_size, axis=0)
-
-    context = np.zeros((n, 1, max_h, max_w))
-    for i, loc in enumerate(density_list):
-        height, width = img_size[i,:]
-        context[i, 0, :height, :width] = density_list[i][0,:,:]
-
-    context = torch.autograd.Variable(torch.from_numpy(context)).type(torch.FloatTensor)
-    # kernel = torch.autograd.Variable(torch.ones(1, 1, wind_h, wind_w)).type(torch.FloatTensor)
-    # context = F.conv2d(context, kernel, bias=None, stride=1, padding=(int(wind_h/2), int(wind_w/2)), dilation=1, groups=1)
-    data = F.avg_pool2d(context, (wind_h, wind_w), stride=1, padding=(int(wind_h//2), int(wind_w//2)))
-    context = context.data.numpy()
 
     if levels is not None:
-        context[context<levels[0]] = 0
-        context[(context>=levels[0]) & (context<levels[1])] = 1
-        context[(context>=levels[1]) & (context<levels[2])] = 2
-        context[(context>=levels[2]) & (context<levels[3])] = 3
-        context[context>=levels[3]] = 4
-        print(f"window size: {wind_h}*{wind_w}", np.histogram(context, bins=[0,1,2,3,4,5])[0])
+        context = np.digitize(context, levels).astype(int) - 1
+        print(f"window size: {wind_h}*{wind_w}\n", itemfreq(context))
+    else:
+        context = context / wind_h / wind_w
 
-    context_list = [torch.from_numpy(context[i, :, :img_size[i][0], :img_size[i][1]]) for i in range(n)]
-    return context_list
+    if patch_pos is None:
+        return [torch.from_numpy(context[i, :, :img_size[i][0], :img_size[i][1]]) for i in range(num_img)]
+    else:
+        return torch.from_numpy(context[:,:,:,:])
 
 class DataFolder(data.Dataset):
     def __init__(self, args, mode='train'):
@@ -177,6 +133,8 @@ class DataFolder(data.Dataset):
         elif mode == 'test':
             self._load_test_data(args)
 
+        gc.collect()
+
     def _load_train_data(self, args):
         dataset_path = args['data']['dataset_path']
         raw_img_path = args['data']['raw_img_path']
@@ -185,38 +143,35 @@ class DataFolder(data.Dataset):
         num_patch = args['data']['train']['num_patch']
 
         with h5py.File(dataset_path, 'r') as hdf:
-            dataset_name = hdf.attrs['dataset_name'].decode('UTF-8')
-            img_size = hdf['train']['img_size'][:300,:]
-            img_name_list = hdf['train']['img_name'][:300]
-            # position_list = [hdf['train']['patch_position'][name][...] for name in img_name_list]
-            # self.image_patch = get_patch_positions(position_list, patch_size, 1)
-            # self.label_patch = get_patch_positions(position_list, patch_size, 4)
+            dataset_name = hdf.attrs['dataset_name']
+            img_size = hdf['train']['img_size'][:,:]
+            img_name_list = hdf['train']['img_name'][:]
 
-        self.loc_list = self.load_location(dataset_path, 'train/location/', img_name_list)
+        # self.loc_list = self.load_location(dataset_path, 'train/location/', img_name_list)
         self.image_list_r, self.image_list_g = self.load_img(img_name_list, raw_img_path, min_size=patch_size)
+        if args['data']['use_roi']:
+            self.image_list_r = self.apply_roi(self.image_list_r, dataset_path, 'train/roi', img_name_list, min_size=patch_size)
+            # self.image_list_g = self.apply_roi(self.image_list_g, dataset_path, 'train/roi', img_name_list, min_size=patch_size)
+
         self.image_patch, self.label_patch = self.get_patches(img_size, patch_size, num_patch, downscale)
         self.sample_number = self.image_patch.shape[0]
         self.image_number = len(self.image_list_r)
 
         if self.target == 'Density':
             self.density_list = self.load_dataset(dataset_path, 'train/'+args['data']['density_group'], img_name_list, min_size=patch_size/4)
-        elif self.target == 'Context':
-            self.context_list = self.load_dataset(dataset_path, 'train/'+args['data']['context_group'], img_name_list, min_size=patch_size/4)
-            # context_list = self.load_dataset(dataset_path, 'train/'+args['data']['context_group'], img_name_list)
-            # self.context_map = torch.cat(context_list, 0)
         elif self.target == 'ContextPyramid':
             self.density_list = self.load_dataset(dataset_path, 'train/'+args['data']['density_group'], img_name_list, min_size=patch_size/4)
-            self.context1_map = get_patch_context(self.density_list, self.label_patch, wind_size=32/downscale)#levels=[1, 5, 10, 20]
-            self.context2_map = get_patch_context(self.density_list, self.label_patch, wind_size=128/downscale)#levels=[10, 40, 80, 160]
-        elif self.target == 'Perspect':
-            self.perspective_list = self.load_dataset(dataset_path, 'train/'+args['data']['perspect_group'], img_name_list, min_size=patch_size/4)
-            # self.perspective_list = [self.value2class(p, [0.02, 0.1, 0.2, 0.5]) for p in self.perspective_list]
+            # self.context1_map = get_patch_context(self.density_list, self.label_patch, wind_size=16/downscale)#32, levels=[1, 5, 10, 20]
+            # self.context2_map = get_patch_context(self.density_list, self.label_patch, wind_size=64/downscale)#128, levels=[10, 40, 80, 160]
+            # self.context1_map = get_context(self.density_list, wind_size=16/downscale, bs=100, levels=[0, 0.01, 0.5, 100], patch_pos=self.label_patch)
+            self.context_map = get_context(self.density_list, wind_size=64/downscale, bs=100, levels=[0, 0.5, 2, 100], patch_pos=self.label_patch)
+        elif self.target == 'PerspectContextPyramid':
+            self.density_list = self.load_dataset(dataset_path, 'train/'+args['data']['density_group'], img_name_list, min_size=patch_size/4)
+            self.context_map = get_context(self.density_list, wind_size=64/downscale, bs=100, levels=[0, 0.5, 2, 100], patch_pos=self.label_patch)
+            self.perspective_list = self.load_dataset(dataset_path, 'train/perspective', img_name_list, min_size=patch_size/4)
         elif self.target == 'Scene':
             self.context_list = self.load_dataset(dataset_path, 'train/'+args['data']['context_group'], img_name_list, min_size=patch_size/4)
             self.perspective_list = self.load_dataset(dataset_path, 'train/'+args['data']['perspect_group'], img_name_list, min_size=patch_size/4)
-        elif self.target == 'MultiTask':
-            self.density_list = self.load_dataset(dataset_path, 'train/'+args['data']['density_group'], img_name_list, min_size=patch_size/4)
-            self.context_map = get_patch_context(self.density_list, self.label_patch, wind_size=64/downscale)
 
         print('Load dataset: {}, # of images: {}, # of samples: {}'.format(dataset_name, self.image_number, self.sample_number))
 
@@ -226,27 +181,29 @@ class DataFolder(data.Dataset):
         downscale = args['data']['downscale']
 
         with h5py.File(dataset_path, 'r') as hdf:
-            dataset_name = hdf.attrs['dataset_name'].decode('UTF-8')
+            dataset_name = hdf.attrs['dataset_name']
             img_size = hdf['test']['img_size'][:,:]
             img_name_list = hdf['test']['img_name'][:]
 
-        self.loc_list = self.load_location(dataset_path, 'test/location/', img_name_list)
+        # self.loc_list = self.load_location(dataset_path, 'test/location/', img_name_list)
         self.image_list, _ = self.load_img(img_name_list, raw_img_path)
         self.sample_number = len(self.image_list)
         self.image_number = len(self.image_list)
 
+        self.image_list_r, _ = self.load_img(img_name_list, raw_img_path)
+        if args['data']['use_roi']:
+            self.image_list_r = self.apply_roi(self.image_list_r, dataset_path, 'test/roi', img_name_list)
         padding = PaddingEX2(32)
         self.image_list = [padding(image) for image in self.image_list]
         label_min_size = [np.array((img.size(1)//downscale, img.size(2)//downscale)) for img in self.image_list]
 
         if self.target == 'Context':
+            self.context_list = get_context(self.density_list, wind_size=64/downscale, bs=100, levels=[2, 5, 20, 40, 80])
             self.context_list = self.load_dataset(dataset_path, 'test/'+args['data']['context_group'], img_name_list, min_size=label_min_size)
         elif self.target == 'ContextPyramid':
             self.density_list = self.load_dataset(dataset_path, 'test/'+args['data']['density_group'], img_name_list, min_size=label_min_size)
-            # self.context1_list = get_context_list(self.density_list, wind_size=32/downscale, levels=[1, 5, 10, 20])
-            # self.context2_list = get_context_list(self.density_list, wind_size=128/downscale,levels=[10, 40, 80, 160])
-            self.context1_list = get_context_list(self.density_list, wind_size=32/downscale)
-            self.context2_list = get_context_list(self.density_list, wind_size=128/downscale)
+            # self.context1_list = get_context(self.density_list, wind_size=16/downscale, bs=100, levels=[0, 0.01, 0.5, 100])
+            self.context_list = get_context(self.density_list, wind_size=64/downscale, bs=100, levels=[0, 0.5, 2, 100])
         elif self.target == 'Density':
             self.density_list = self.load_dataset(dataset_path, 'test/'+args['data']['density_group'], img_name_list, min_size=label_min_size)
         elif self.target == 'Perspect':
@@ -288,32 +245,43 @@ class DataFolder(data.Dataset):
 
         return data
 
-    def load_img(self, img_name_list, raw_img_path, min_size=None):
+    def load_img(self, img_name_list, raw_img_path, min_size=None, gray_scale=False):
         '''
         load PIL images, and convert PIL images to patch Tensors
         '''
+        def load(path):
+            return PIL.Image.open(path).convert('RGB')
+
+        print(f"Loading images...\r",end="")
+
         num = len(img_name_list)
         to_tensor = ToTensor()
-        normalizer = transforms.Normalize(mean=[127, 127, 127], std=[255, 255, 255])
+        normalizer = transforms.Normalize(mean=[0, 0, 0], std=[255, 255, 255])
 
-        img_list_r, img_list_g = [], []
-        for i, name in enumerate(img_name_list):
-            img_r, img_g = load_img(raw_img_path + name.decode('UTF-8'))
-            img_r = normalizer(to_tensor(img_r))
-            img_g = normalizer(to_tensor(img_g))
-            img_list_r.append(img_r)
-            img_list_g.append(img_g)
+        img_list_r = [load(raw_img_path + name.decode('UTF-8')) for name in img_name_list]
+        img_list_r = [normalizer(to_tensor(img)) for img in img_list_r]
 
-            if i % 20 == 0:
-                print(f"Loading images... {i/num*100:.1f} % ({i} of {num})\r",end="")
-        print(" "*100+"\r", end="")
-
+        """
+        if gray_scale:
+            img_list_g = [img.convert('L').convert('RGB') for img in img_list_r]
+        """
         if min_size is not None:
             min_h, min_w = min_size[0], min_size[1]
             img_list_r = [pad2d_max(data, min_h, min_w) for data in img_list_r]
-            img_list_g = [pad2d_max(data, min_h, min_w) for data in img_list_g]
+            # img_list_g = [pad2d_max(data, min_h, min_w) for data in img_list_g]
+        return img_list_r, None
 
-        return img_list_r, img_list_g
+    def apply_roi(self, img_list, dataset_path, group, name_list, min_size=None):
+        num = len(img_list)
+
+        with h5py.File(dataset_path, 'r') as hdf:
+            for i, name in enumerate(name_list):
+                print(f"Applying ROI... {i/num*100:.1f} % ({i} of {num})\r",end="")
+                roi = hdf[group][name][...]
+                roi = np.repeat(roi[np.newaxis,:,:], 3, axis=0)
+                img_list[i] = torch.from_numpy(roi).float() * img_list[i]
+            print(" "*100+"\r", end="")
+        return img_list
 
     def load_dataset(self, dataset_path, group, name_list, min_size=None):
         num = len(name_list)
@@ -384,11 +352,13 @@ class DataFolder(data.Dataset):
 
     def _get_train_data(self, index):
         i, l, u, r, b = self.image_patch[index,:]
-        if random.random() < 0.7:
+        """
+        if random.random() < 10:
             image = self.image_list_r[i][:, u:b, l:r]
         else:
             image = self.image_list_g[i][:, u:b, l:r]
-
+        """
+        image = self.image_list_r[i][:, u:b, l:r]
         out = [index]
 
         i, l, u, r, b = self.label_patch[index,:]
@@ -404,10 +374,9 @@ class DataFolder(data.Dataset):
 
         elif self.target == 'ContextPyramid':
             density = self.density_list[i][:, u:b, l:r]
-            context1 = self.context1_map[index, :, :]
-            context2 = self.context2_map[index, :, :]
-            image, density, context1, context2 = self.augment_img(image, density=density, context1=context1, context2=context2)
-            out.extend([image, density, context1, context2])
+            context = self.context_map[index, :, :]
+            image, density, context = self.augment_img(image, density=density, context=context)
+            out.extend([image, density, context])
 
         elif self.target == 'Perspect':
             label = self.perspective_list[i][:, u:b, l:r]
@@ -420,11 +389,6 @@ class DataFolder(data.Dataset):
             image, context, perspect = self.augment_img(image, context=context, perspect=perspect)
             out.extend([image, context, perspect])
 
-        elif self.target == 'MultiTask':
-            density = self.density_list[i][:, u:b, l:r]
-            context = self.context_map[index, :, :]
-            image, density, context = self.augment_img(image, density=density, context=context)
-            out.extend([image, density, context])
         return out
 
     def _get_test_data(self, index):
@@ -437,16 +401,12 @@ class DataFolder(data.Dataset):
             out.append(self.context_list[index])
         elif self.target == 'ContextPyramid':
             out.append(self.density_list[index])
-            out.append(self.context1_list[index])
-            out.append(self.context2_list[index])
+            out.append(self.context_list[index])
         elif self.target == 'Perspect':
             out.append(self.perspective_list[index])
         elif self.target == 'Scene':
             out.append(self.context_list[index])
             out.append(self.perspective_list[index])
-        elif self.target == 'MultiTask':
-            out.append(self.density_list[index])
-            out.append(self.context_list[index])
 
         return out
 

@@ -1,0 +1,37 @@
+{
+    "data":{
+      "dataset":"Mall",
+      "dataset_path":"/home/zhouqi/crowd_count/dataset/mall/mall_dataset.h5",
+      "raw_img_path":"/home/zhouqi/crowd_count/dataset/mall/train_test_images/",
+      "density_group":"density_downscale_4_beta_20",
+      "downscale":4,
+      "img_num_channel":3,
+      "train":{
+          "patch_size":[480, 640],
+          "num_patch":1,
+          "num_workers":10,
+          "batch_size":20,
+          "pin_memory":false,
+          "random_noise":true
+      },
+      "test":{
+          "num_workers":20,
+          "batch_size":1,
+          "pin_memory":false,
+          "random_noise":false
+      }
+    },
+  "model":{
+    "target":"ContextPyramid",
+    "arch":"Pyramid_Context",
+    "context_weight":[1, 4, 15],
+    "use_bn":true,
+    "activation":"LeakyReLU",
+    "optimizer":"Adam",
+    "epochs":1000,
+    "test_freq":5,
+    "learning_rate":1e-5,
+    "weight_decay":1e-5,
+    "resume":false
+  }
+}

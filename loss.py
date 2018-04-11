@@ -28,6 +28,9 @@ class ContrastiveLoss2(torch.nn.Module):
         return loss_contrastive
 
 class MSELoss(_Loss):
+    def __init__(self):
+        super(MSELoss, self).__init__()
+
     def forward(self, pred, target):
         # _assert_no_grad(target)
         loss = torch.sum((pred - target)**2) / pred.size(0)
@@ -60,6 +63,70 @@ class L1Loss(_Loss):
         return F.l1_loss(input, target, size_average=self.size_average)
 
 
+class PmapLoss(_Loss):
+    def __init__(self, ksize=15):
+        self.ksize = ksize
+        self.avg_pool = nn.AvgPool1d(kernel_size=ksize, stride=ksize)
+
+    def forward(self, pred, target, avg_density, mask):
+        x = self.avg_pool(torch.sum(pred, dim=3)) * self.ksize
+        y = self.avg_pool(torch.sum(target, dim=3)) * self.ksize
+
+        n1 = y[:, :, :-1]
+        n2 = y[:, :, 1:]
+
+class GradientLoss(_Loss):
+    def __init__(self, alpha=1):
+        super(GradientLoss, self).__init__()
+        self.alpha = alpha
+        self.pad_left = nn.ConstantPad2d((1,0,0,0), 0)
+        self.pad_top  = nn.ConstantPad2d((0,0,1,0), 0)
+
+    def forward(self, pred, true):
+        x1 = torch.abs(pred[:,:,:,1:] - pred[:,:,:,:-1])
+        x2 = torch.abs(true[:,:,:,1:] - true[:,:,:,:-1])
+        y1 = torch.abs(pred[:,:,1:,:] - pred[:,:,:-1,:])
+        y2 = torch.abs(true[:,:,1:,:] - true[:,:,:-1,:])
+
+        x1 = self.pad_left(x1)
+        x2 = self.pad_left(x2)
+        y1 = self.pad_top(y1)
+        y2 = self.pad_top(y2)
+
+        loss = torch.sum(torch.abs(x1-x2)**self.alpha+torch.abs(y1-y2)**self.alpha) / pred.size(0)
+
+        return loss
+
+class L2_Grad_Loss(_Loss):
+    def __init__(self, alpha=1, lambda_g=1):
+        super(L2_Grad_Loss, self).__init__()
+        self.lambda_g = lambda_g
+        self.alpha = alpha
+        self.pad_left = nn.ConstantPad2d((1,0,0,0), 0)
+        self.pad_top  = nn.ConstantPad2d((0,0,1,0), 0)
+
+    def forward(self, pred, true):
+        l2_loss = torch.sum((pred - true)**2) / pred.size(0)
+
+        x1 = torch.abs(pred[:,:,:,1:] - pred[:,:,:,:-1])
+        x2 = torch.abs(true[:,:,:,1:] - true[:,:,:,:-1])
+        y1 = torch.abs(pred[:,:,1:,:] - pred[:,:,:-1,:])
+        y2 = torch.abs(true[:,:,1:,:] - true[:,:,:-1,:])
+
+        x1 = self.pad_left(x1)
+        x2 = self.pad_left(x2)
+        y1 = self.pad_top(y1)
+        y2 = self.pad_top(y2)
+
+        grad_loss = torch.sum((x1-x2)**self.alpha + (y1-y2)**self.alpha) / pred.size(0)
+
+        return l2_loss + self.lambda_g * grad_loss
+
+class KLLoss(_Loss):
+    def forward(self, pred, target):
+        loss = torch.sum(target*(torch.log(target+1e-6) - torch.log(pred+1e-6))) / pred.size(0)
+        return loss
+
 class CrossEntropyLoss2d(nn.Module):
     def __init__(self, weight=None, size_average=True, ignore_index=255):
         super(CrossEntropyLoss2d, self).__init__()
@@ -76,6 +143,7 @@ class FocalLoss2d(nn.Module):
         self.nll_loss = nn.NLLLoss2d(weight, size_average, ignore_index)
 
     def forward(self, inputs, targets):
+        inputs += 1e-6
         if targets.dim() == 4:
             n, c, h, w = targets.size()
             targets = targets.contiguous().view(n, h, w)

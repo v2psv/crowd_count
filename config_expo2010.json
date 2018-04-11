@@ -1,0 +1,40 @@
+{
+    "data":{
+      "dataset":"Expo2010",
+      "dataset_path":"/home/zhouqi/crowd_count/dataset/expo2010/expo2010.h5",
+      "raw_img_path":"/home/zhouqi/crowd_count/dataset/expo2010/train_test_images/",
+      "density_group":"density_downscale_4_beta_1",
+      "downscale":4,
+      "img_num_channel":3,
+      "use_pmap":true,
+      "train":{
+          "patch_size":[576, 736],
+          "num_patch":1,
+          "num_workers":10,
+          "batch_size":40,
+          "pin_memory":false,
+          "random_noise":true
+      },
+      "test":{
+          "patch_size":[576, 736],
+          "num_workers":10,
+          "batch_size":10,
+          "pin_memory":false,
+          "random_noise":false
+      }
+    },
+  "model":{
+    "target":"ContextPyramid",
+    "arch":"Pyramid_Context",
+    "context_levels":3,
+    "context_weight":[1, 6, 20],
+    "use_bn":true,
+    "activation":"LeakyReLU",
+    "optimizer":"Adam",
+    "epochs":1000,
+    "test_freq":1,
+    "learning_rate":1e-5,
+    "weight_decay":1e-5,
+    "resume":false
+  }
+}
